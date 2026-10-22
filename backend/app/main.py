@@ -1,7 +1,8 @@
 import base64
 import io
 import os
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Query,
+                     Response, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import numpy as np
@@ -13,6 +14,8 @@ from .config import APP_PACKAGES
 from .ingest import ingest_alert
 from .ledger import parse_alert, list_entries
 from . import qrph, qrstore
+from .report import evidence, packing_csv
+from .review import acknowledge, review_list
 from .verify import get_stats, list_history, list_pending, verify_receipt
 
 app = FastAPI(title="Checkiz")
@@ -184,3 +187,30 @@ def qr_orders():
 def orders():
     """Live order board: OPEN orders waiting for payment, PAID ones settled."""
     return qrstore.list_orders()
+
+
+# ---- Reconciliation --------------------------------------------------------
+
+@app.get("/review", dependencies=[Depends(require_key)])
+def review():
+    """The orders Checkiz could not settle on its own: fakes, duplicates,
+    receipts still waiting for a payment, QRs that expired unpaid, and payments
+    confirmed only by a spoofable alert source."""
+    return review_list()
+
+@app.post("/review/{order_id}", dependencies=[Depends(require_key)])
+def review_ack(order_id: str):
+    """Take an order off the review list. A newer verdict for it puts it back."""
+    return acknowledge(order_id)
+
+@app.get("/orders/packing.csv", dependencies=[Depends(require_key)])
+def packing():
+    """Paid orders as a CSV checklist, ready-to-pick straight off the screen."""
+    return Response(packing_csv(), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="packing-list.csv"'})
+
+@app.get("/orders/{order_id}/evidence", dependencies=[Depends(require_key)])
+def order_evidence(order_id: str):
+    """Timestamped record of what happened to one order, for disputing it later.
+    Never includes the raw alert text or a receipt image."""
+    return evidence(order_id)

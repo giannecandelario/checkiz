@@ -27,7 +27,8 @@ def auto_settle(entry: dict):
     msg = f"Auto-settled: payment of {row['amount']:.2f} matches the amount issued for Order #{oid}"
     if chk:
         msg += f". {chk}"
-    log_verdict(oid, "VERIFIED", msg, row["amount"], entry["ref"] if entry.get("has_ref") else None)
+    log_verdict(oid, "VERIFIED", msg, row["amount"], entry["ref"] if entry.get("has_ref") else None,
+                needs_app_check=bool(chk))
     return {"order_id": oid, "status": "VERIFIED", "message": msg, "needs_app_check": bool(chk)}
 
 def ingest_alert(entry: dict) -> dict:

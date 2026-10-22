@@ -9,12 +9,16 @@
   #card { display: none; margin: 12px; padding: 14px 18px; border-radius: 12px; color: #fff;
           font-size: 22px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
   #card small { display: block; font-size: 15px; opacity: .9; margin-top: 4px; }
+  #queue { margin: 0 12px; font-family: system-ui, sans-serif; font-size: 15px;
+           color: rgba(255,255,255,.85); text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+  #queue b { color: #ffb74d; }
   .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
   .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
 </style>
 </head>
 <body>
 <div id="card"></div>
+<div id="queue"></div>
 <script>
 const q = new URLSearchParams(location.search);
 const API = q.get("api") || "http://localhost:8000", KEY = q.get("key");
@@ -33,6 +37,19 @@ async function poll() {
     }
   } catch (e) {}
 }
+const LABEL = { SUSPECTED_FAKE: "suspected fake", DUPLICATE: "duplicate",
+  PENDING_MATCH: "no payment yet", CONFIRM_IN_APP: "confirm in app", UNPAID_EXPIRED: "never paid" };
+async function showQueue() {
+  try {
+    const rows = await (await fetch(API + "/review", { headers: KEY ? { "X-API-Key": KEY } : {} })).json();
+    document.getElementById("queue").innerHTML = rows.length
+      ? `Needs review: <b>${rows.length}</b> (last: #${esc(rows[0].order_id)} ` +
+        `${esc(LABEL[rows[0].reason] || rows[0].reason)})`
+      : "Needs review: 0";
+  } catch (e) {}
+}
+showQueue(); setInterval(showQueue, 5000);
+
 poll(); setInterval(poll, 2000);
 </script>
 </body>

@@ -134,15 +134,15 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
     res["elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
     f = res.get("fields") or {}
     log_verdict(order_id, res["status"], res["message"], f.get("amount"), f.get("ref"),
-                res["elapsed_ms"])
+                res["elapsed_ms"], res.get("needs_app_check"))
     return res
 
-def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None):
+def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False):
     with get_conn() as conn:
         conn.execute(
-            "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (order_id, status, message, amount, ref, elapsed_ms),
+            "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms, "
+            "needs_app_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check))),
         )
 
 def get_stats():
@@ -169,6 +169,7 @@ def resolve_pending(ref: str):
             return None
         conn.execute("DELETE FROM pending WHERE ref = ?", (ref,))
     entry = find_entry(ref)
+    chk = None
     if p["amount"] is not None and abs(entry["amount"] - p["amount"]) > 0.01:
         status = "SUSPECTED_FAKE"
         msg = f"Amount mismatch: receipt {p['amount']:.2f}, ledger {entry['amount']:.2f}"
@@ -178,8 +179,13 @@ def resolve_pending(ref: str):
         add_claim(ref, p["order_id"])
         settle_order(p["order_id"], ref)
         status, msg = "VERIFIED", f"Ref {ref} matched incoming payment of {entry['amount']:.2f} (late SMS)"
-    log_verdict(p["order_id"], status, msg, p["amount"], ref)
-    return {"order_id": p["order_id"], "status": status, "message": msg}
+        chk = app_check_warning(entry)
+        if chk:
+            msg += f". {chk}"
+    app_check = bool(chk)
+    log_verdict(p["order_id"], status, msg, p["amount"], ref, needs_app_check=app_check)
+    return {"order_id": p["order_id"], "status": status, "message": msg,
+            "needs_app_check": app_check}
 
 def list_history(limit: int = 20):
     with get_conn() as conn:

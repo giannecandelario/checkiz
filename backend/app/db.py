@@ -45,7 +45,13 @@ CREATE TABLE IF NOT EXISTS verifications (
     amount REAL,
     ref TEXT,
     elapsed_ms INTEGER,
+    needs_app_check INTEGER DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS review_ack (
+    order_id TEXT PRIMARY KEY,
+    acked_id INTEGER DEFAULT 0,
+    acked_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -60,6 +66,7 @@ def init_db():
         # Older local databases: add columns introduced later.
         for table, col, ddl in [
             ("verifications", "elapsed_ms", "INTEGER"),
+            ("verifications", "needs_app_check", "INTEGER DEFAULT 0"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
             ("qr_orders", "status", "TEXT DEFAULT 'OPEN'"),

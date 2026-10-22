@@ -14,6 +14,13 @@
   #banner { margin-top: 20px; padding: 16px; border-radius: 8px; color: #fff; display: none; }
   .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
   .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
+  .CONFIRM_IN_APP { background: #1565c0; } .UNPAID_EXPIRED { background: #616161; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; color: #fff;
+           font-size: .78rem; white-space: nowrap; }
+  #evidence { background: #fafafa; border: 1px solid #ddd; border-radius: 8px; padding: 12px;
+              margin-top: 16px; }
+  #evidence ol { margin: 8px 0 0; padding-left: 20px; font-size: .9rem; }
+  #evidence li { margin: 4px 0; }
   small { display: block; margin-top: 8px; opacity: .85; }
   h2 { margin-top: 32px; font-size: 1.1rem; }
   table { width: 100%; border-collapse: collapse; font-size: .9rem; }
@@ -28,7 +35,19 @@
 <input id="file" type="file" accept="image/*" hidden>
 <button id="cam" type="button">Take a photo of the receipt</button>
 <input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
+<p id="conn" hidden style="color:#c62828"></p>
 <div id="banner"></div>
+
+<h2>Needs review <span id="reviewCount"></span></h2>
+<p><small>This is the whole job after a stream: the orders Checkiz could not settle by itself.
+Fakes, duplicates, receipts still waiting for a payment, QRs that expired unpaid, and payments
+confirmed only by a spoofable alert.</small></p>
+<table id="review"><thead><tr><th>Order</th><th>Why</th><th>Detail</th><th></th></tr></thead><tbody></tbody></table>
+<p>
+  <button id="packing" type="button">Download packing list (CSV)</button>
+  <a href="qr.html">QR Ph tools</a>
+</p>
+<div id="evidence" hidden></div>
 
 <h2>Recent verifications</h2>
 <p id="stats"><small></small></p>
@@ -47,9 +66,26 @@
 
 <script src="camera.js"></script>
 <script>
-const API = "http://localhost:8000";
+const API = (new URLSearchParams(location.search).get("api") || "http://localhost:8000").replace(/\/$/, "");
 const $ = id => document.getElementById(id);
 const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
+
+let apiOk = true;
+async function get(path) {
+  const res = await fetch(API + path, { headers: hdr() });
+  if (!res.ok) throw new Error(path + " returned HTTP " + res.status);
+  const data = await res.json();
+  if (!apiOk) { apiOk = true; $("conn").hidden = true; }
+  return data;
+}
+function apiDown(err) {
+  apiOk = false;
+  const c = $("conn");
+  c.hidden = false;
+  c.innerHTML = `<small>Can't reach the API at <code>${esc(API)}</code> (${esc(String(err && err.message || err))}). ` +
+    `Start it, or point this page at it with <code>?api=http://your-ip:8000</code> in the address bar. ` +
+    `Tables stay empty until it answers.</small>`;
+}
 const drop = $("drop"), fileInput = $("file");
 drop.onclick = () => fileInput.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
@@ -74,44 +110,97 @@ async function send(file) {
     banner.innerHTML = `<strong>${esc(r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
       (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
       `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
-    loadLedger(); loadHistory(); loadOrders();
+    loadLedger(); loadHistory(); loadOrders(); loadReview();
   } catch (err) {
     banner.className = "SUSPECTED_FAKE"; banner.textContent = "Could not reach the server";
+    apiDown(err);
   }
 }
 
 async function loadLedger() {
   try {
-    const rows = await (await fetch(API + "/ledger", { headers: hdr() })).json();
+    const rows = await get("/ledger");
     $("ledger").querySelector("tbody").innerHTML = rows.map(r =>
       `<tr><td>${esc(r.ref)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.sender)}</td><td>${esc(r.source)}</td></tr>`).join("");
-  } catch (e) {}
+  } catch (e) { apiDown(e); }
 }
 
 async function loadOrders() {
   try {
-    const rows = await (await fetch(API + "/orders", { headers: hdr() })).json();
+    const rows = await get("/orders");
     $("orders").querySelector("tbody").innerHTML = rows.map(r =>
       `<tr><td>#${esc(r.order_id)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.status)}</td></tr>`).join("");
-  } catch (e) {}
+  } catch (e) { apiDown(e); }
 }
+
+const LABEL = { SUSPECTED_FAKE: "Suspected fake", DUPLICATE: "Duplicate",
+  PENDING_MATCH: "No payment yet", CONFIRM_IN_APP: "Confirm in app", UNPAID_EXPIRED: "Never paid" };
+
+async function loadReview() {
+  let rows;
+  try { rows = await get("/review"); } catch (e) { apiDown(e); return; }
+  $("reviewCount").textContent = rows.length ? `(${rows.length})` : "- nothing";
+  $("review").querySelector("tbody").innerHTML = rows.map(r =>
+    `<tr><td>#${esc(r.order_id)}</td><td><span class="badge ${esc(r.reason)}">${esc(LABEL[r.reason] || r.reason)}</span></td>` +
+    `<td>${esc(r.detail)}${r.amount == null ? "" : ` <small>(${Number(r.amount).toFixed(2)})</small>`}</td>` +
+    `<td><button type="button" class="why" data-o="${esc(r.order_id)}">why</button> ` +
+    `<button type="button" class="ok" data-o="${esc(r.order_id)}">reviewed</button></td></tr>`).join("")
+    || `<tr><td colspan="4"><small>Nothing to review. Every order is settled or still waiting on a payment alert.</small></td></tr>`;
+}
+
+$("review").addEventListener("click", async e => {
+  const order = e.target.dataset.o;
+  if (!order) return;
+  if (e.target.className === "ok") {
+    await fetch(`${API}/review/${encodeURIComponent(order)}`, { method: "POST", headers: hdr() });
+    loadReview();
+    if (!$("evidence").hidden) showEvidence(order);
+  } else showEvidence(order);
+});
+
+async function showEvidence(order) {
+  const box = $("evidence");
+  try {
+    const ev = await get(`/orders/${encodeURIComponent(order)}/evidence`);
+    const steps = ev.timeline.map(t =>
+      `<li><small>${esc(t.at)} UTC</small> ` +
+      (t.kind === "verdict" ? `<span class="badge ${esc(t.status)}">${esc(t.status.replace("_", " "))}</span>`
+                            : `<em>${esc(t.kind)}</em>`) + ` ${esc(t.detail)}</li>`).join("");
+    box.hidden = false;
+    box.innerHTML = `<strong>Order #${esc(order)}</strong> <small>` +
+      (ev.issued ? `QR issued for ${Number(ev.issued.amount).toFixed(2)}, ${esc(ev.issued.status)}`
+                 : "no QR issued for this order") +
+      (ev.reviewed_at ? `, reviewed ${esc(ev.reviewed_at)} UTC` : "") + `</small>` +
+      (steps ? `<ol>${steps}</ol>` : "<p><small>Nothing recorded yet.</small></p>");
+  } catch (e) { box.hidden = true; }
+}
+
+$("packing").onclick = async () => {
+  const res = await fetch(API + "/orders/packing.csv", { headers: hdr() });
+  if (!res.ok) { alert("Could not fetch the packing list (is the API key right?)"); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await res.blob());
+  a.download = "packing-list.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
 
 async function loadStats() {
   try {
-    const t = await (await fetch(API + "/stats", { headers: hdr() })).json();
+    const t = await get("/stats");
     const b = t.by_status || {};
     $("stats").firstChild.textContent = `Total ${t.total} | Verified ${b.VERIFIED || 0} | Pending ${b.PENDING_MATCH || 0} | ` +
       `Suspected fake ${b.SUSPECTED_FAKE || 0} | Duplicate ${b.DUPLICATE || 0} | Avg ${t.avg_elapsed_ms ?? "-"} ms`;
-  } catch (e) {}
+  } catch (e) { apiDown(e); }
 }
 
 async function loadHistory() {
   loadStats();
   try {
-    const rows = await (await fetch(API + "/history", { headers: hdr() })).json();
+    const rows = await get("/history");
     $("history").querySelector("tbody").innerHTML = rows.map(r =>
       `<tr><td>#${esc(r.order_id)}</td><td>${esc(r.status.replace("_", " "))}</td><td>${esc(r.ref)}</td><td>${r.amount == null ? "-" : Number(r.amount).toFixed(2)}</td></tr>`).join("");
-  } catch (e) {}
+  } catch (e) { apiDown(e); }
 }
 
 $("addSms").onclick = async () => {
@@ -119,12 +208,12 @@ $("addSms").onclick = async () => {
     headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify({ text: $("sms").value }) });
   if (!res.ok) { alert("No incoming payment found in that text"); return; }
   const out = await res.json();
-  $("sms").value = ""; loadLedger(); loadHistory(); loadOrders();
+  $("sms").value = ""; loadLedger(); loadHistory(); loadOrders(); loadReview();
   const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
   if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.status.replace("_", " ")}`).join("\n"));
 };
-loadLedger(); loadHistory(); loadOrders();
-setInterval(() => { loadOrders(); loadHistory(); loadLedger(); }, 5000);
+loadLedger(); loadHistory(); loadOrders(); loadReview();
+setInterval(() => { loadOrders(); loadHistory(); loadLedger(); loadReview(); }, 5000);
 </script>
 </body>
 </html>
