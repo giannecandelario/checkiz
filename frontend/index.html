@@ -66,27 +66,39 @@ confirmed only by a spoofable alert.</small></p>
 <button id="addSms">Add to ledger</button>
 <table id="ledger"><thead><tr><th>Ref</th><th>Amount</th><th>Sender</th><th>Source</th></tr></thead><tbody></tbody></table>
 
+<script src="api.js"></script>
 <script src="camera.js"></script>
 <script>
-const API = (new URLSearchParams(location.search).get("api") || "http://localhost:8000").replace(/\/$/, "");
+const API = CHECKIZ_API;
 const $ = id => document.getElementById(id);
 const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
 
 let apiOk = true;
 async function get(path) {
-  const res = await fetch(API + path, { headers: hdr() });
-  if (!res.ok) throw new Error(path + " returned HTTP " + res.status);
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(API + path, { headers: hdr() });
+  } catch (e) {
+    throw new Error(checkizProblem(null, e));
+  }
+  if (!res.ok) throw new Error(checkizProblem(res));
+  const data = await res.json().catch(() => { throw new Error(checkizProblem(res)); });
   if (!apiOk) { apiOk = true; $("conn").hidden = true; }
   return data;
 }
+// The five-second polls all fail the same way, so the "what is on that port"
+// probe runs at most once a quarter-minute instead of once per failed table.
+let lastProbe = 0;
 function apiDown(err) {
   apiOk = false;
   const c = $("conn");
+  const why = (err && err.message) || String(err);
   c.hidden = false;
-  c.innerHTML = `<small>Can't reach the API at <code>${esc(API)}</code> (${esc(String(err && err.message || err))}). ` +
-    `Start it, or point this page at it with <code>?api=http://your-ip:8000</code> in the address bar. ` +
-    `Tables stay empty until it answers.</small>`;
+  c.innerHTML = `<small>${esc(why)} Tables stay empty until it answers.</small>`;
+  if (Date.now() - lastProbe > 15000) {
+    lastProbe = Date.now();
+    checkizWho().then(who => { if (!apiOk) c.innerHTML = `<small>${esc(why)} ${esc(who)}</small>`; });
+  }
 }
 const drop = $("drop"), fileInput = $("file");
 drop.onclick = () => fileInput.click();
@@ -98,15 +110,33 @@ $("cam").onclick = () => cameraCapture(send);
 
 function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 
+// A failed response as one sentence a seller can act on: Checkiz's own reason when
+// it sent JSON, the connection problem - and the banner - when something else answered.
+async function problem(res) {
+  if (checkizIsUnreachable(res)) { const m = checkizProblem(res); apiDown(new Error(m)); return m; }
+  return (await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`;
+}
+
 async function send(file) {
   if (!file) return;
+  const banner = $("banner");
+  const order = $("order").value.trim();
+  if (!order) {
+    banner.style.display = "block"; banner.className = "PENDING_MATCH";
+    banner.textContent = "Type the order ID first - a receipt is only settled against an order.";
+    return;
+  }
   const form = new FormData();
   form.append("file", file);
-  form.append("order_id", $("order").value);
-  const banner = $("banner");
+  form.append("order_id", order);
   banner.style.display = "block"; banner.className = ""; banner.textContent = "Checking...";
   try {
     const res = await fetch(API + "/verify", { method: "POST", body: form });
+    if (!res.ok) {
+      banner.className = "PENDING_MATCH";
+      banner.innerHTML = `<strong>Not checked</strong><br>${esc(await problem(res))}`;
+      return;
+    }
     const r = await res.json();
     banner.className = r.status;
     banner.innerHTML = `<strong>${esc(r.label || r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
@@ -121,7 +151,8 @@ async function send(file) {
       `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
     loadLedger(); loadHistory(); loadOrders(); loadReview();
   } catch (err) {
-    banner.className = "SUSPECTED_FAKE"; banner.textContent = "Could not reach the server";
+    banner.className = "PENDING_MATCH";
+    banner.innerHTML = `<strong>Not checked</strong><br>${esc(err.message || err)}`;
     apiDown(err);
   }
 }
@@ -162,7 +193,9 @@ $("review").addEventListener("click", async e => {
   const order = e.target.dataset.o;
   if (!order) return;
   if (e.target.className === "ok") {
-    await fetch(`${API}/review/${encodeURIComponent(order)}`, { method: "POST", headers: hdr() });
+    const res = await fetch(`${API}/review/${encodeURIComponent(order)}`,
+      { method: "POST", headers: hdr() });
+    if (!res.ok) { await problem(res); return; }
     loadReview();
     if (!$("evidence").hidden) showEvidence(order);
   } else showEvidence(order);
@@ -184,17 +217,17 @@ async function showEvidence(order) {
                  : "no QR issued for this order") +
       (ev.reviewed_at ? `, reviewed ${esc(ev.reviewed_at)} UTC` : "") + `</small>` +
       (steps ? `<ol>${steps}</ol>` : "<p><small>Nothing recorded yet.</small></p>");
-  } catch (e) { box.hidden = true; }
+  } catch (e) {
+    box.hidden = false;
+    box.innerHTML = `<strong>Order #${esc(order)}</strong> <small>${esc(e.message || e)}</small>`;
+  }
 }
 
 $("packing").onclick = async () => {
   const res = await fetch(API + "/orders/packing.csv", { headers: hdr() });
-  if (!res.ok) { alert("Could not fetch the packing list (is the API key right?)"); return; }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(await res.blob());
-  a.download = "packing-list.csv";
-  a.click();
-  URL.revokeObjectURL(a.href);
+  if (!res.ok) { await problem(res); return; }
+  try { await checkizDownload(await res.blob(), "packing-list.csv"); }
+  catch (e) { apiDown(new Error(checkizProblem(null, e))); }
 };
 
 async function loadStats() {
@@ -217,9 +250,10 @@ async function loadHistory() {
 }
 
 $("addSms").onclick = async () => {
+  if (!$("sms").value.trim()) { alert("Paste the alert text first."); return; }
   const res = await fetch(API + "/ledger/paste", { method: "POST",
     headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify({ text: $("sms").value }) });
-  if (!res.ok) { alert("No incoming payment found in that text"); return; }
+  if (!res.ok) { alert(await problem(res)); return; }
   const out = await res.json();
   $("sms").value = ""; loadLedger(); loadHistory(); loadOrders(); loadReview();
   const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);

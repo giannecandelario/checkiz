@@ -19,15 +19,23 @@
 <body>
 <div id="card"></div>
 <div id="queue"></div>
+<script src="api.js"></script>
 <script>
 const q = new URLSearchParams(location.search);
-const API = q.get("api") || "http://localhost:8000", KEY = q.get("key");
+const API = CHECKIZ_API, KEY = q.get("key");
 let lastId = null;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+// An OBS source has no console to read, so the state goes in the page title, which
+// the Browser Source does show. Silence on screen is deliberate; a frozen card must
+// still be explainable.
+const status = s => { document.title = `Checkiz Overlay - ${s}`; };
+const hdr = () => KEY ? { "X-API-Key": KEY } : {};
 async function poll() {
   try {
-    const res = await fetch(API + "/history?limit=1", { headers: KEY ? { "X-API-Key": KEY } : {} });
+    const res = await fetch(API + "/history?limit=1", { headers: hdr() });
+    if (!res.ok) return status(checkizProblem(res));
     const [r] = await res.json();
+    status("connected");
     if (r && r.id !== lastId) {
       lastId = r.id;
       const card = document.getElementById("card");
@@ -37,18 +45,20 @@ async function poll() {
         (n ? ` <em>${n} thing${n > 1 ? "s" : ""} to check</em>` : "") +
         `<small>${esc(r.message)}</small>`;
     }
-  } catch (e) {}
+  } catch (e) { status(checkizProblem(null, e)); }
 }
 const LABEL = { SUSPECTED_FAKE: "suspected fake", DUPLICATE: "duplicate",
   PENDING_MATCH: "no payment yet", CONFIRM_IN_APP: "confirm in app", UNPAID_EXPIRED: "never paid" };
 async function showQueue() {
   try {
-    const rows = await (await fetch(API + "/review", { headers: KEY ? { "X-API-Key": KEY } : {} })).json();
+    const res = await fetch(API + "/review", { headers: hdr() });
+    if (!res.ok) return status(checkizProblem(res));
+    const rows = await res.json();
     document.getElementById("queue").innerHTML = rows.length
       ? `Needs review: <b>${rows.length}</b> (last: #${esc(rows[0].order_id)} ` +
         `${esc(rows[0].label || LABEL[rows[0].reason] || rows[0].reason)})`
       : "Needs review: 0";
-  } catch (e) {}
+  } catch (e) { status(checkizProblem(null, e)); }
 }
 showQueue(); setInterval(showQueue, 5000);
 

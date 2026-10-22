@@ -1,8 +1,16 @@
 import json
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "checkiz.db"
+def _db_path():
+    """One SQLite file by default, but a demo, a device test or a second instance
+    on this machine must not be able to write into the developer's data."""
+    env = os.getenv("CHECKIZ_DB_PATH")
+    return Path(env).expanduser().resolve() if env else (
+        Path(__file__).resolve().parent.parent / "checkiz.db")
+
+DB_PATH = _db_path()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger (

@@ -433,7 +433,11 @@ async function send(file) {
 </html>
 ```
 
-Open the file in a browser, or serve it with `python -m http.server 3000` from `frontend/`.
+This is the guide's first draft of the page, and it guesses the API origin. What ships
+is different in two ways: `frontend/api.js` decides the origin once for all three pages
+(own origin, else `?api=`, else `localhost:8000`) and explains a wrong answer instead of
+saying "could not reach the server", and the backend serves `frontend/` itself. So
+`uvicorn app.main:app` and then open http://localhost:8000/ - no second web server.
 
 ## 9a. Reference number note
 

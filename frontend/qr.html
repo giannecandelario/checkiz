@@ -12,12 +12,14 @@
   .box { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-top: 18px; }
   small { display: block; opacity: .85; margin-top: 6px; } img { max-width: 100%; }
   h2 { font-size: 1.05rem; margin: 0 0 6px; }
+  #conn { color: #c62828; }
 </style>
 </head>
 <body>
 <h1>Checkiz QR Ph</h1>
 <p><a href="index.html">&larr; Receipt checker</a></p>
 <input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
+<p id="conn" hidden></p>
 
 <div class="box">
   <h2>1. Your QR Ph</h2>
@@ -36,42 +38,76 @@
   <div id="genOut"></div>
 </div>
 
+<script src="api.js"></script>
 <script src="camera.js"></script>
 <script>
-const API = "http://localhost:8000";
+const API = CHECKIZ_API;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
 const json = body => ({ method: "POST", headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify(body) });
 
+// Names the failure instead of returning a half-read body: a 401, a 400 "Not a
+// payment QR", or a port held by something that is not Checkiz at all.
+async function reason(res) {
+  if (checkizIsUnreachable(res)) {
+    const m = checkizProblem(res);
+    $("conn").hidden = false;
+    $("conn").innerHTML = `<small>${esc(m)} ${esc(await checkizWho())}</small>`;
+    return m;
+  }
+  $("conn").hidden = true;
+  return (await res.json().catch(() => ({}))).detail || `HTTP ${res.status}`;
+}
+
 async function scan(file) {
-  const f = new FormData(); f.append("file", file);
-  return (await fetch(API + "/qr/decode", { method: "POST", body: f, headers: hdr() })).json();
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(API + "/qr/decode", { method: "POST", body: form, headers: hdr() });
+  if (!res.ok) return { payload: null, message: await reason(res) };
+  try { return await res.json(); }
+  catch (e) { return { payload: null, message: checkizProblem(res) }; }
 }
 async function loadSeller() {
   try {
-    const r = await (await fetch(API + "/qr/seller", { headers: hdr() })).json();
+    const res = await fetch(API + "/qr/seller", { headers: hdr() });
+    if (!res.ok) { const m = await reason(res); $("seller").textContent = m; return; }
+    const r = await res.json();
     $("seller").textContent = r.registered ? `Registered: ${r.info.merchant_name || "(no name)"}, ${r.info.merchant_city || ""}` : "No QR registered yet.";
-  } catch (e) { $("seller").textContent = "Could not reach the server"; }
+  } catch (e) {
+    $("seller").textContent = checkizProblem(null, e);
+    $("conn").hidden = false;
+    $("conn").innerHTML = `<small>${esc(await checkizWho())}</small>`;
+  }
 }
 async function register(file) {
   const r = await scan(file);
   if (!r.payload) return alert(r.message);
   const res = await fetch(API + "/qr/register", json({ payload: r.payload }));
-  if (!res.ok) return alert((await res.json()).detail);
+  if (!res.ok) return alert(await reason(res));
   loadSeller();
 }
 $("regCam").onclick = () => cameraCapture(register, { live: async raw => {
   const res = await fetch(API + "/qr/register", json({ payload: raw }));
-  res.ok ? loadSeller() : alert((await res.json()).detail); } });
+  res.ok ? loadSeller() : alert(await reason(res)); } });
 $("regFile").onchange = e => e.target.files[0] && register(e.target.files[0]);
 
 $("gen").onclick = async () => {
-  const res = await fetch(API + "/qr/generate", json({ order_id: $("oid").value, amount: Number($("amt").value), centavo_code: $("cents").checked }));
+  const order = $("oid").value.trim();
+  if (!order) { $("genOut").textContent = "Type the order ID this QR is for."; return; }
+  const res = await fetch(API + "/qr/generate", json({ order_id: order, amount: Number($("amt").value), centavo_code: $("cents").checked }));
+  if (!res.ok) { $("genOut").textContent = await reason(res); return; }
   const r = await res.json();
-  if (!res.ok) { $("genOut").textContent = r.detail; return; }
-  $("genOut").innerHTML = `<img src="${r.png}" alt="QR"><small>Order #${esc(r.order_id)}: ask the buyer to pay exactly PHP ${r.amount.toFixed(2)}.</small>` +
-    `<a href="${r.png}" download="order-${esc(r.order_id)}.png">Download PNG</a>`;
+  $("genOut").innerHTML = `<img id="qrimg" alt="QR"><small>Order #${esc(r.order_id)}: ask the buyer to pay exactly PHP ${r.amount.toFixed(2)}.</small>` +
+    `<button id="save" type="button">Download PNG</button> <span id="saveWhy"></span>`;
+  // The image arrives as a data: URL. Setting it as a src is fine; a download link
+  // on that same URL is refused by Chrome and Safari, so the button converts it.
+  $("qrimg").src = r.png;
+  $("save").onclick = async () => {
+    $("saveWhy").textContent = "Saving...";
+    try { await checkizDownload(r.png, `order-${String(r.order_id).replace(/[^\w.-]/g, "_")}.png`); $("saveWhy").textContent = ""; }
+    catch (e) { $("saveWhy").textContent = `Could not save it (${e.message || e}). Right-click the image and choose Save.`; }
+  };
 };
 
 loadSeller();

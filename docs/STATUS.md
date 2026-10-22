@@ -1,6 +1,6 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23 against `feat/product-hardening`. Suite: **141 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23 against `fix/ui-runtime`. Suite: **157 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
@@ -11,17 +11,20 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **141 tests passing*
 | Replay protection (one reference, one order) | Yes | `ledger.consumed_order`, `verify.py` DUPLICATE branch | `test_engine.py::test_verified_then_duplicate`, `test_settle.py::test_one_payment_settles_one_order_only`, `test_real_receipt_cannot_be_reused_on_another_order` |
 | Ledger match, late-alert resolution | Yes | `backend/app/ingest.py`, `verify.py::resolve_pending` | 3 tests in `test_engine.py`, 1 in `test_settle.py` |
 | Order-bound QR Ph + centavo codes | Yes | `backend/app/qrph.py`, `qrstore.py`, `qr_orders` table | `test_qr.py` (5), `test_settle.py::test_auto_settle_without_screenshot`, `test_receipt_amount_must_match_issued_amount` |
-| Alert feed: notification / SMS / paste, trust levels | Yes | `main.py` routes at lines 62, 72, 83; `CHECKIZ_APP_PACKAGES` allow-list; paste splits on blank lines | `test_engine.py`, `test_settle.py` trust tests, `test_api_key_protects_ledger` |
-| `needs_app_check` persisted, incl. the late-alert path | Yes | `verifications.needs_app_check`, `verify.py:111`, `ingest.py` | `test_settle.py::test_sms_only_large_payment_needs_app_check`, `test_app_sourced_large_payment_needs_no_extra_check`, `test_review.py::test_late_sms_match_is_queued_for_app_check` |
+| Alert feed: notification / SMS / paste, trust levels | Yes | `main.py` routes at lines 91, 101, 112; `CHECKIZ_APP_PACKAGES` allow-list; paste splits on blank lines | `test_engine.py`, `test_settle.py` trust tests, `test_api_key_protects_ledger` |
+| `needs_app_check` persisted, incl. the late-alert path | Yes | `verifications.needs_app_check`, `verify.py:49`, `ingest.py` | `test_settle.py::test_sms_only_large_payment_needs_app_check`, `test_app_sourced_large_payment_needs_no_extra_check`, `test_review.py::test_late_sms_match_is_queued_for_app_check` |
 | Review queue, acknowledge + reopen | Yes | `backend/app/review.py`, `GET /review`, `POST /review/{id}` | 8 tests in `test_review.py` |
 | Packing list CSV, formula-injection neutralised | Yes | `backend/app/report.py`, `GET /orders/packing.csv` | `test_review.py::test_packing_csv_*` (2) |
 | Per-order evidence timeline | Yes | `report.evidence`, `GET /orders/{id}/evidence` | `test_review.py::test_evidence_timeline_keeps_alert_text_out` |
 | ELA + sharpness check | Yes, but **not separating the sample pair** | `backend/app/forensics.py` | Flag behaviour is tested; detection quality is not, and cannot be with synthetic samples |
-| Dashboard, order board, OBS overlay | Yes | `frontend/index.html`, `overlay.html` | None - no UI test harness in the repo |
-| **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html:97` and `qr.html:64` | None; and untestable here because the in-app browser denies camera permission |
+| Dashboard, order board, OBS overlay | Yes | `frontend/index.html`, `overlay.html`, served by the API itself | No UI harness; but `test_serving.py` proves every page and helper is actually served and that all three load `api.js`. Panel rendering is still only looked at by hand |
+| **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html` and `qr.html` | 25 assertions executed in Node against a stubbed window: every refusal reason, the 0x0 startup race, live QR, and the no-`BarcodeDetector` path - three guards then mutated to confirm each one is load-bearing. **No real phone yet**, and the in-app browser here cannot grant camera permission at all |
+| Pages served from the API origin | Yes | `main.py` `frontend_dir()` and the `StaticFiles` mount at `main.py:253`, mounted after every route | `test_serving.py` (16): root, three pages, two helpers, an API route beating the catch-all, and `/health` reporting `ui` |
+| One rule for where the API is, and a real reason when a request fails | Yes | `frontend/api.js` - `CHECKIZ_API` (`?api=` > own origin > `localhost:8000`), `checkizProblem`, `checkizIsUnreachable`, `checkizWho`, `checkizDownload` | Executed in Node with a stubbed `location`/`fetch`/`document`/`URL`: 22 assertions. Mutating away the same-origin rule, the foreign-server branch and the late revoke each breaks its own assertion |
+| `CHECKIZ_DB_PATH`, so two instances do not share one file | Yes | `db.py:_db_path()` | 4 of the 16 in `test_serving.py` (override, relative and `~` forms, the default, and that the pointed-at file is the one created) |
 | Retake hint on a poor photo | Yes | `parser.ocr_confidence` averages Tesseract's per-word scores; `verify.retake_hint` turns a score under `config.OCR_CONFIDENCE_MIN` into `hint` on the verdict, shown in the dashboard banner. `confidence` is on every verdict response; the hint is not stored | `test_confidence.py` (22): the average and each half of its row filter, a blank page as `None`, the floor as config, and four engine tests that pin the status while the hint appears. The **floor** has never been measured on a phone photo - see "Photo quality" |
-| Startup warning when `CHECKIZ_API_KEY` unset | Yes | `main.py:28` | Not asserted by a test |
-| `/health` | Yes | `main.py:48` | Yes, in the API smoke test |
+| Startup warning when `CHECKIZ_API_KEY` unset | Yes | `main.py:49` | Not asserted by a test |
+| `/health` | Yes | `main.py:74` | `test_serving.py::test_health_names_the_server_so_a_page_can_tell_it_apart`, plus the API smoke test |
 | Plain-language verdict `label` field | Yes | `backend/app/labels.py`; `label` on every verdict response, late-alert resolution, auto-settlement result, history row, review item and evidence event; `verifications.label` column with migration; `/stats` also returns `by_label`; shown in `index.html` and `overlay.html`. Upload rejections (415/413) are HTTP errors and carry no verdict | `test_labels.py` (19). Status codes are unchanged and still asserted |
 | Buyer pay page (`/pay/{order_id}`, `qr.png`, `pay.html`) | **No** | - | Brief Step 0 lists it; README claimed it Built |
 | Scripted demo (`backend/demo.py`) | **No** | - | README's "Getting started" references a file that does not exist |
@@ -184,6 +187,62 @@ screenshot tool was unavailable in the in-app browser this time, so the check wa
 the rendered DOM text plus the computed style (`display:block`, `8px 10px` padding,
 `rgba(0,0,0,.22)` on the banner colour), not a picture.
 
+## The runtime round: what broke when the pages were actually opened
+
+The owner reported two bugs - "the redirect does not work (pages fail to load)" and "the
+camera feature is not working". Both were real, and the first was not one bug:
+
+- **Port 8000 belonged to another project.** Two dev servers for Vitalsort were listening
+  on 8000 and 8001. Checkiz's dashboard defaulted to `http://localhost:8000`, so every
+  request reached *that* server: `POST /verify` answered 501, `GET /history` answered 404
+  with HTML. The page said "Can't reach the API" while something was answering - the
+  message was wrong, and unverifiable from the seller's side. The owner was asked, agreed
+  to free the ports, and the two processes were stopped; 8000 and 8001 are Checkiz's again.
+  Restarting them is `python3 -m http.server 8000` in `Vitalsort-App/frontend` and
+  `python3 -m uvicorn main:app --port 8001 --ws websockets` in `Vitalsort-App/backend`.
+- **The API never served the UI.** `docker run -p 8000:8000 checkiz` contained no pages at
+  all, so a dashboard required a second web server, and `index.html` ↔ `qr.html` links only
+  worked if that server happened to be running. That is the "page fails to load" half.
+- **`qr.html` hardcoded `http://localhost:8000`**, with no `?api=` escape like the other pages.
+- **The QR download could not work.** `/qr/generate` returns the PNG as a `data:` URL and the
+  page put that straight into `<a download>`, which Chrome and Safari refuse. The button
+  looked dead.
+- **The camera helper failed silently.** `.catch(fallback)` reported nothing; the fallback
+  `<input>` was never attached to the document; and Capture could fire while the `<video>`
+  was still 0x0, handing over a blank photo the server then called unreadable.
+
+Fixes, in the order a seller meets them: the backend serves `frontend/` itself
+(`main.py:253`, mounted after every API route), so there is one origin and no second
+server; `frontend/api.js` gives all three pages the same rule for finding the API and turns
+every failure into a sentence that names the address, the HTTP status, the content type and
+the likely cause, backed by `/health` now answering `{"ok": true, "name": "checkiz",
+"ui": true}` so a page can say *which* server it reached; a failed `/verify` shows
+**"Not checked"** in the amber class instead of painting the banner red, because a
+connection problem is not a suspected fake; the QR page downloads through a Blob rather
+than a `data:` link; `camera.js` states the reason (https-or-localhost, permission refused,
+another app holding the camera, no rear camera, an unnamed failure quoting its own name),
+waits for a real frame size, and attaches the native picker before clicking it;
+`CHECKIZ_DB_PATH` lets a second instance have its own file.
+
+What was executed, and where it stops:
+
+- **157 pytest**, 16 of them new in `tests/test_serving.py`. They fail if the mount goes
+  before the API routes, if `frontend/` is not copied into the image, if a page stops
+  loading `api.js`, or if `_db_path()` stops honouring the environment.
+- The three pages and both helpers were fetched over HTTP from a running server
+  (`GET /`, `/qr.html`, `/overlay.html`, `/api.js` → 200 with the expected content types;
+  `/docs` still FastAPI's; an unknown path 404s as JSON), and `/review` returned live data.
+- `api.js` and `camera.js` were then run in Node against a stubbed `location` / `fetch` /
+  `document` / `URL` - **22 and 25 assertions, all passing** - and four guards were mutated
+  away (the same-origin rule, the foreign-server branch, the late revoke, the 0x0 wait) to
+  confirm each one breaks its own assertion rather than passing by accident. That harness is
+  **not in the repo**: it lives in this session only, so re-verification needs a browser or
+  someone checking it in as a real UI test.
+- **Not done: no click-through.** Browser navigation was blocked in this environment, so the
+  dashboard's panels, the packing download, the QR button and the camera prompt have not
+  been pressed in a real page this round - and the camera has never been tried on a phone,
+  which is the only place the new reason messages will show what they are for.
+
 ## What no test covers
 
-The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour (the samples have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 141 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, the Docker build, real Tesseract behaviour (the samples have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 157 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.

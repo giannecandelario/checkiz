@@ -1,9 +1,12 @@
 import base64
 import io
 import os
+from pathlib import Path
+
 from fastapi import (Depends, FastAPI, File, Form, Header, HTTPException, Query,
                      Response, UploadFile)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import cv2
 import numpy as np
 import qrcode
@@ -22,12 +25,35 @@ app = FastAPI(title="Checkiz")
 # Prototype only: restrict origins and add an API key before real use.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+def frontend_dir():
+    """Where the dashboard pages live, or None when they are not next to this
+    process. Serving them from the API is what makes one origin: the pages then
+    never guess a port, a phone on the same network works without `?api=`, and a
+    link that 404s is a real bug instead of a missing second web server.
+
+    The second candidate is also what the Docker image resolves: WORKDIR is
+    /app/backend, so this file is /app/backend/app/main.py and the sibling folder
+    is /app/frontend."""
+    candidates = [os.getenv("CHECKIZ_FRONTEND"),
+                  Path(__file__).resolve().parents[2] / "frontend"]
+    for c in candidates:
+        if c and Path(c).is_dir():
+            return str(c)
+    return None
+
+FRONTEND = frontend_dir()
+
 @app.on_event("startup")
 def startup():
     init_db()
     if not os.getenv("CHECKIZ_API_KEY"):
         print("WARNING: CHECKIZ_API_KEY is not set. Anyone who can reach this server can "
               "post fake payment alerts. Set it before using real money.")
+    if FRONTEND:
+        print(f"Dashboard pages served from {FRONTEND} - open them at whatever address "
+              "this server was started on, e.g. http://localhost:8000/")
+    else:
+        print("No frontend found - API only. Set CHECKIZ_FRONTEND to the folder with index.html.")
 
 def require_key(x_api_key: str | None = Header(None), key: str | None = Query(None)):
     """Optional protection: set CHECKIZ_API_KEY to lock the ledger and history
@@ -47,7 +73,10 @@ class NotificationIn(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    """`name` lets a page tell Checkiz from whatever else happens to be listening
+    on the port it was pointed at - the failure mode where another project's
+    server answers with HTML and the dashboard says only 'could not reach'."""
+    return {"ok": True, "name": "checkiz", "ui": bool(FRONTEND)}
 
 @app.post("/verify")
 async def verify(file: UploadFile = File(...), order_id: str = Form(...)):
@@ -214,3 +243,11 @@ def order_evidence(order_id: str):
     """Timestamped record of what happened to one order, for disputing it later.
     Never includes the raw alert text or a receipt image."""
     return evidence(order_id)
+
+
+# ---- The dashboard pages ----------------------------------------------------
+# Mounted last so it only answers paths no API route claimed. This is a catch-all
+# for files, not a proxy: nothing here reads or writes money.
+
+if FRONTEND:
+    app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="dashboard")

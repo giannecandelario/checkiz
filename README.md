@@ -122,8 +122,9 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Alert feed: notification, SMS, paste endpoints with trust levels | Built, tested; phone forwarders untested on a device |
 | Review queue, evidence view, packing list CSV | Built, tested |
 | Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration |
-| Dashboard, order board, OBS overlay | Built (basic), no automated tests |
-| Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), untested - needs a real phone |
+| Dashboard, order board, OBS overlay | Built (basic). Served by the API itself; the panels have no automated tests |
+| One origin for the pages and the API, with a stated reason when a request fails | Built. Serving tested in `tests/test_serving.py`; the page-side helper was executed against a stubbed browser, not clicked through |
+| Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), its failure paths executed against a stubbed camera - still needs a real phone |
 | Retake hint when a photo reads poorly (`confidence` and `hint` on the verdict) | Built, tested as advice only - the floor has never been measured on a phone photo ([`backend/app/parser.py`](backend/app/parser.py)) |
 | Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
 | Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
@@ -172,24 +173,26 @@ Phone photos of screens are where plain OCR is weakest. An optional vision model
 ```bash
 # 1. Install Tesseract (Ubuntu: sudo apt install tesseract-ocr | macOS: brew install tesseract | Windows: UB-Mannheim build, add to PATH)
 
-# 2. Backend
+# 2. Backend - it serves the dashboard too, so there is only one thing to run
 cd backend
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python seed.py            # seeds the mock ledger
 python make_samples.py    # writes synthetic samples/real.png and samples/edited.png
 uvicorn app.main:app --reload
-
-# 3. Frontend (new terminal)
-cd frontend
-python -m http.server 3000   # open http://localhost:3000  (use ?api=http://<lan-ip>:8000 from a phone)
 ```
+
+Open **http://localhost:8000/**. The pages and the API share that one origin, so no page has to be told where the other half lives.
+
+- **From a phone on the same network:** run `uvicorn app.main:app --host 0.0.0.0 --port 8000` and open `http://<lan-ip>:8000/`. The in-page camera only works over https or localhost, so on a plain LAN address the photo buttons fall back to the phone's own camera - the reason is shown on screen when that happens.
+- **If another project is already on 8000:** start Checkiz on a free port and open that. A page pointed at something that is not Checkiz now says what answered it instead of reporting "could not reach the server".
+- **Two Checkiz instances at once** (a demo over someone's data, a device test): give the second one its own file with `CHECKIZ_DB_PATH=/tmp/demo.db`.
 
 Tests: `cd backend && pytest` (OCR is stubbed, Tesseract not needed). Docker: `docker build -t checkiz . && docker run -p 8000:8000 checkiz`.
 
 A scripted demo on a throwaway database (`backend/demo.py`) is planned and **not in the repo yet**; until it exists, the way to see the logic without a phone is to upload the synthetic samples above. It would use the **synthetic** samples, so it shows the logic, not accuracy on real receipts.
 
-Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8), `CHECKIZ_OCR_CONFIDENCE_MIN` (60, the floor under which a photo is called retake-worthy). For the consistency signals: `CHECKIZ_AMOUNT_MIN` (1.00), `CHECKIZ_AMOUNT_MAX` (50000.00), `CHECKIZ_RECEIPT_MAX_AGE_HOURS` (48), `CHECKIZ_TZ_OFFSET_HOURS` (8), `CHECKIZ_DATE_FORMATS`, `CHECKIZ_AMOUNT_LABELS`, `CHECKIZ_REF_LABELS`, `CHECKIZ_LAYOUT_LABEL_WINDOW` (1). The two label lists are what make the layout check follow a wallet's wording instead of assuming one.
+Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8), `CHECKIZ_OCR_CONFIDENCE_MIN` (60, the floor under which a photo is called retake-worthy), `CHECKIZ_DB_PATH` (`backend/checkiz.db`, so a second instance can be given its own file), `CHECKIZ_FRONTEND` (the folder beside this backend, if the pages live elsewhere). For the consistency signals: `CHECKIZ_AMOUNT_MIN` (1.00), `CHECKIZ_AMOUNT_MAX` (50000.00), `CHECKIZ_RECEIPT_MAX_AGE_HOURS` (48), `CHECKIZ_TZ_OFFSET_HOURS` (8), `CHECKIZ_DATE_FORMATS`, `CHECKIZ_AMOUNT_LABELS`, `CHECKIZ_REF_LABELS`, `CHECKIZ_LAYOUT_LABEL_WINDOW` (1). The two label lists are what make the layout check follow a wallet's wording instead of assuming one.
 
 ### Demo scenarios
 
