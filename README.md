@@ -1,132 +1,147 @@
 # Checkiz
 
-Order-bound payment checking for Filipino online sellers.
+**For small online sellers who get paid by personal e-wallet: know which orders were really paid, and catch reused or mismatched receipts, without checking the app one screenshot at a time.**
 
-**Target user:** small online sellers (MSMEs) on TikTok Live, Facebook, and Viber who get paid by personal wallet or personal bank account - GCash, Maya, ShopeePay, a bank app - with no payment gateway and no one to watch the apps during a rush.
+Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style transfers. Upload or photograph a receipt and get a plain verdict. Where possible it confirms the receipt against payment alerts the seller already receives, and it can settle an order from the alert alone, with no screenshot.
 
-Checkiz does two things. It settles orders straight from the seller's own payment alerts, and it checks receipt screenshots for the buyers who still send them. It sits between a buyer's payment submission and the seller's order fulfillment. It reads an uploaded payment receipt, checks the image for tampering, and matches the reference number against the seller's incoming transaction log. It is not tied to one wallet, because it keys on what every payment produces: a reference number and an amount.
+Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-## The Problem
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 43 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
-Sellers on TikTok Live, Facebook, Instagram, and Viber are targeted by the "Canva scam": buyers use Canva or Photoshop templates to fake payment receipts - GCash and Maya are the usual forgeries because that is where the money moves - editing the amount, timestamp, and reference number. During a live stream, orders arrive faster than a seller can open an app and read a reference number for each one, so they ship against proof they never actually verified and lose both inventory and shipping fees.
+## Who it is for
 
-This is not a hypothetical. GCash itself has warned about AI-generated fake receipt screenshots and tells payees to confirm a payment in the app's Transactions tab instead of trusting an image the sender sent ([Mynt newsroom, Jul 2025](https://mynt.com.ph/newsroom/gcash-warns-public-on-emerging-ai-generated-fake-receipts-scams-urges-users-to-always-check-transactions-tab)). Online selling fraud big enough to make the news is still happening in this market - police reported a ₱1.4 million online tire scam suspect in October 2026 ([Tribune](https://tribune.net.ph/2026-10-16/p14-m-online-tire-scam-suspect-collared)), though that report is about the sale, not specifically a forged receipt.
+**One user: the small online seller.** Someone who sells through Facebook, TikTok or Viber (often by live selling), takes personal-wallet transfers, ships after payment, and confirms payments by hand with no payment gateway.
 
-## How It Works
+**One job:** for each order, know whether it was really paid, and spot reused or mismatched receipts without opening the wallet app for every screenshot.
 
-1. **Ingestion:** the buyer uploads a screenshot through the web page in this repo. Messenger and Viber delivery is on the roadmap, not built.
-2. **OCR and parsing:** extracts amount, reference number, timestamp, and recipient.
-3. **Tampering analysis:**
-   - Compression check (built): error-level analysis and local sharpness on the Amount and Reference Number fields.
-   - Font check (not built): would compare font family, size, and kerning against the receipt screen of the app the seller actually uses - which is the reason it is not built yet, since that differs per provider.
-4. **Ledger matching:** compares the reference number against the seller's incoming transaction log (SMS/email alerts, or a mock ledger in the prototype).
-5. **Verdict:**
+A typical routine this is built for (a hypothetical, **not** from an interview): the seller goes live a few nights a week, collects transfers, checks screenshots against the app late at night, and ships the next day.
 
-| Status | Meaning |
-|---|---|
-| VERIFIED | Valid format and matching reference number found. Approved for packing. |
-| PENDING MATCH | Valid format, but the reference number hasn't appeared in the logs yet. |
-| SUSPECTED FAKE | Invalid reference format, an amount that disagrees with the matched alert, or a forensic flag with no payment behind it. |
-| DUPLICATE | This reference number already settled another order. |
+**Buyers are not the target user.** They are the other side of the transaction. Their experience still matters, because order binding only works if paying the exact amount is easy - which is why a simple buyer pay page is planned (not built yet; see [Features](#features)).
 
-The forensic check alone never produces SUSPECTED FAKE when a payment matches the ledger; a flagged image on a matched payment becomes a warning instead, because a confirmed transfer is stronger evidence than an image score.
+Not the focus for now (see [Future directions](#future-directions)): stores with staff, and freelancers.
 
-## Order-bound payments
+## The problem
+
+Sellers take orders from comments during a live, then collect and confirm payments afterwards, often by chat and a spreadsheet. The official advice from banks and wallets is that a screenshot is not proof: check the transaction history in the app. At volume that is slow, and a fake can get through when the seller is tired or rushed. A fake receipt can carry a plausible reference number and amount. Wallets have also warned about receipts generated by AI apps.
+
+I did not find seller interviews or measured fraud rates for sellers, so this describes the workflow and official guidance, **not** how often fakes succeed. Validating this with real sellers is on the roadmap.
+
+Sources (link status checked 2026-10-23):
+- GMA News, **"Fake proof of payments used in P1.4 million online selling scam"** - opened, title confirmed: https://www.gmanetwork.com/news/topstories/metro/1006083/fake-proof-of-payments-used-in-p1-4-million-online-selling-scam/story/
+- GCash notice on AI-generated fake receipts and checking the Transactions tab - opened (note: the `news-draft` path 404s, `newsroom` is the live one): https://mynt.com.ph/newsroom/gcash-warns-public-on-emerging-ai-generated-fake-receipts-scams-urges-users-to-always-check-transactions-tab
+- GCash moving confirmations from SMS to the app inbox (September 2022) - both opened: https://bitpinas.com/?p=32051 and https://unbox.ph/news/iwas-scam-no-more-sms-gcash-will-send-notifications-via-app/
+- Live-selling order handling - both opened: https://www.bigseller.pro/blog/articleDetails/4531/mastering-facebook-live-orders-2026-tips-for-filipino-sellers.htm and https://www.rbdblog.com/?p=27345
+- MSME record-keeping context - opened (a sari-sari store case study): https://www.ejournals.ph/article.php?id=14871
+- **Could not verify, listed for completeness only:** BDO "Beware of fake proof of payment" (https://bdo.com.ph/node/64820 - connection failed) and https://plus.inquirer.net/?p=329830 (403 to automated access). Nothing above depends on them.
+
+## What it tells you
+
+| Verdict | Meaning | How reliable |
+|---|---|---|
+| **Verified** | The receipt's reference and amount match a payment alert on the seller's own ledger | Strongest signal. Only as trustworthy as the alert feed |
+| **Reused** | This reference (or this image) was already accepted for another order | Reliable for repeats of a reference number |
+| **Doesn't match** | The amount differs from the alert, or from the amount issued for this order | Reliable when a ledger entry exists |
+| **Likely edited** | Image signals suggest tampering | **Weak. See below** |
+| **Can't confirm yet** | Looks well formed but no matching payment has arrived | Wait for the alert or check the wallet app |
+
+The API currently returns status codes (`VERIFIED`, `DUPLICATE`, `SUSPECTED_FAKE`, `PENDING_MATCH`). **These plain-language labels are not in the responses yet** - adding a `label` field is task 1 in [`AGENT_BRIEF.md`](AGENT_BRIEF.md), and the dashboard still shows the codes.
+
+**What Checkiz cannot do:** prove a receipt is fake from the image alone. A clean, AI-generated receipt can look perfect. Image analysis is a secondary signal. **Confirm large payments in the wallet app.**
+
+### Measured so far (honest)
+
+On the shipped *synthetic* sample pair (not real receipts), at default thresholds (ELA 8.0, sharpness 6.0), run through real Tesseract in the Docker image:
+
+| Sample | ELA | Sharpness | Verdict | Time |
+|---|---|---|---|---|
+| `real.png` | 5.78 | 4.08 | VERIFIED | 582 ms |
+| `edited.png` | 5.82 | 4.08 | SUSPECTED FAKE | 693 ms |
+
+**The forensic check did not separate the two.** The edited receipt was caught only because its amount (9250.00) did not match the ledger alert (1250.00). Thresholds need calibration on genuine receipts before any claim about edit detection. `backend/calibrate.py` supports this.
+
+## What makes it different: order binding
 
 The obvious question is "is this receipt real?". Checkiz also asks "was this payment made for *this order*?"
 
-1. The seller makes a QR Ph for each order with a fixed amount and a free centavo code (for example PHP 150.37), so every open order has a different amount.
-2. When the matching payment alert arrives, **the order settles itself. The buyer doesn't need to send a screenshot, and the seller doesn't need to open the wallet app.** The live order board and the stream overlay show it as paid.
-3. If a buyer does send a receipt, its amount must equal the amount issued for that order. A genuine receipt from another order, or from a different payment, can't be reused, and one payment can only settle one order.
+1. The seller generates a QR Ph for each order with a fixed amount and a free centavo code (for example PHP 150.37), so every open order has a different amount.
+2. When the matching alert arrives, **the order settles itself**, with no screenshot and no need to open the wallet app.
+3. If a buyer also sends a receipt, its amount must equal the amount issued for that order. A genuine receipt from another order cannot be reused, and one payment settles only one order.
 
-This works with ordinary personal transfers, so no business registration or gateway is needed. Its limits: amount matching only covers orders made through Checkiz's QR, the receiving app may ignore the reference label (the centavo code is the fallback), and an unrelated payment that happens to equal an open order's exact amount within the 24-hour window would match it (the window is `CHECKIZ_ORDER_TTL_HOURS`).
+Limits: it only covers orders made through Checkiz's QR page. The wallet may ignore the reference label (the centavo code is the fallback). An unrelated payment with exactly the same amount as an open order, inside the time window (`CHECKIZ_ORDER_TTL_HOURS`, default 24), would match it.
 
-## Not tied to one wallet
+## How it works
 
-A small seller's money arrives through GCash, Maya, ShopeePay, a bank app, or a plain bank transfer, often two or three of those on the same day. Checkiz models none of them specifically. It keys on what every payment produces: a reference number and an amount.
+1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, or (c) pasted text. Each entry records its source, and sources have different trust (see below).
+2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts reference, amount and time. Reference format and replay are checked, then the ledger.
+3. **Settlement:** a ledger match (or an alert that matches an open coded order) settles the order. The order is locked to that payment.
+4. **Review queue:** anything unresolved, suspicious, duplicate, or needing an in-app confirmation is listed for the seller. Receipt images are not stored, only extracted fields and the verdict.
 
-| Part | Why it is not provider-specific |
-|---|---|
-| Ledger reconciliation | Entries are keyed by reference number, then settled by comparing the amount. No provider name appears anywhere in that path. |
-| Alert intake | Three sources in trust order: app notification, SMS, pasted text. Which apps count as trusted is an env var (`CHECKIZ_APP_PACKAGES`), so adding a bank app is a package name, not a code change. |
-| Order binding | QR Ph is the national standard supervised by the BSP, and one QR Ph is payable from both bank and e-money accounts ([PayMongo's QR Ph doc](https://docs.paymongo.com/docs/payment-acceptance-qr-ph), [QR Ph on Wikipedia](https://en.wikipedia.org/wiki/QR_Ph)). The coded amount lives in the shared EMVCo payload, not in a wallet's own feature. |
-| Receipt reference | The digit count the parser searches for is built from `CHECKIZ_REF_LENGTH` (default 13), not hard-coded ([backend/app/parser.py:9](backend/app/parser.py#L9)). |
+### Alert trust levels
 
-What *is* coupled, and what an added provider would actually need:
+| Source | Endpoint | Trust | Note |
+|---|---|---|---|
+| Wallet-app notification | `POST /ledger/notification` | Highest | Android sets the package name, so a texter cannot fake it. Package allow-list: `CHECKIZ_APP_PACKAGES` |
+| SMS | `POST /ledger/sms` | Medium | Sender IDs can be spoofed. Large SMS-only payments return `needs_app_check` |
+| Pasted text | `POST /ledger/paste` | Medium | Fallback, for example text copied from the in-app inbox |
 
-- **Currency formatting.** Both parsers need a currency token and two decimals: the alert parser accepts `PHP` / `₱` / `PhP` ([backend/app/ledger.py:6](backend/app/ledger.py#L6)), the receipt parser also a bare `P` ([backend/app/parser.py:8](backend/app/parser.py#L8)). An amount written `1,250` with no symbol and no cents parses as nothing.
-- **English alert wording.** Text only counts as money-in when it matches `received|credited|money in|you got` ([backend/app/ledger.py:9](backend/app/ledger.py#L9)). Bank SMS phrase this differently often enough to need per-provider tests.
-- **The `Ref` label.** A reference number is only read after `Ref` / `Reference No` / `Ref. #` ([backend/app/ledger.py:7](backend/app/ledger.py#L7)). Without it the entry gets a synthetic hash key, which still matches on amount but can no longer be checked for replay.
+GCash moved send-money and other confirmations from SMS to its app inbox starting in 2022, so **SMS may not arrive at all**. Check what your own phone receives. Whether the wallet app posts a push notification for each incoming payment is **unconfirmed** and needs a real-device test (`docs/DEVICE_TEST.md` is still to be written - see the roadmap).
 
-And nothing here has been validated against a second provider: every measured number in this README came from a synthetic GCash-style receipt, and the QR payload was written from the general EMVCo spec without the BSP book or a real bank QR ([docs/QR_PH.md](docs/QR_PH.md) says the same). "Not tied to one wallet" describes the design, not a tested multi-bank capability.
-
-## After the stream: the review list
-
-The seller's job is not to check every order. It is to check the few Checkiz could not decide on.
-
-`GET /review` merges everything still needing a person into one list, and the dashboard puts it at the top:
-
-| Reason | What it means |
-|---|---|
-| SUSPECTED FAKE | Bad reference format, an amount that disagrees with the ledger, or an image the forensic check flagged with no matching payment. |
-| DUPLICATE | This reference number already settled another order. |
-| PENDING MATCH | A receipt arrived, but no matching payment alert yet. |
-| CONFIRM IN APP | Paid, but the only evidence is a source a texter could spoof (SMS or pasted text) and the amount is at or above `CHECKIZ_CONFIRM_ABOVE`. |
-| NEVER PAID | A QR was issued for the order and nothing matched it inside `CHECKIZ_ORDER_TTL_HOURS`. |
-
-Marking an order reviewed takes it off the list. A newer verdict for the same order puts it back, so reviewing is never a way to hide a problem.
-
-Two reports for the packing shift:
-
-- `GET /orders/packing.csv` - paid orders as a checklist. A row still waiting on an in-app confirmation is printed with `confirm_in_app=YES`, so a printed list cannot hide an unsettled risk.
-- `GET /orders/{id}/evidence` - the timestamped record for one order: the QR issued, the alert that settled it and which source it came from, every verdict, and when it was reviewed. This is what a dispute is argued with.
+The tool is not tied to one wallet: reconciliation keys on reference and amount, trusted apps and reference length are configurable (`CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH`), and order binding uses QR Ph, which is payable from bank and e-money apps. Parsers currently require a `PHP`/`₱` amount with two decimals, an English money-in word (`received`, `credited`, `money in`, `you got`) and a `Ref` label; without a reference label an entry gets a synthetic key and loses replay detection.
 
 ## Features
 
-- **Order-bound auto-settlement:** described above.
-- **Trust-aware alert feed:** wallet-app notifications (hardest to fake), SMS, or pasted inbox text. SMS sender IDs can be spoofed, so large payments seen only by SMS are flagged "confirm in the app". Alerts without a reference number are accepted. Outgoing alerts are ignored.
-- **Anti-Canva forensic engine:** compression and sharpness analysis on the Amount and Reference Number fields.
-- **Anti-replay protection:** every settled reference is locked to one order.
-- **Reconciliation review list:** the exceptions, in one queue, with a per-order evidence trail and a packing-list export.
-- **Live order board and stream overlay:** open and paid orders, plus an OBS/web widget with real-time verdicts and a running count of orders still needing review.
-- **QR Ph reference generator:** QR codes with a fixed amount and Order ID.
+| Feature | Status |
+|---|---|
+| Receipt upload and OCR extraction, reference validation | Built, tested |
+| Replay protection (a reference is locked to one order) | Built, tested |
+| Ledger match, late-alert resolution of pending receipts | Built, tested |
+| Order-bound QR Ph generator, auto-settlement from alerts | Built, tested; wallet behaviour with the order reference untested |
+| Alert feed: notification, SMS, paste endpoints with trust levels | Built, tested; phone forwarders untested on a device |
+| Review queue, evidence view, packing list CSV | Built, tested |
+| Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration |
+| Dashboard, order board, OBS overlay | Built (basic), no automated tests |
+| Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), untested - needs a real phone |
+| Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
+| Plain-language verdict labels in the API | **Planned, not built** |
+| Image fingerprint for reuse; consistency checks | Planned |
+| Optional AI-assisted reading (extraction only, off by default, gated by evaluation) | Planned |
+| Real-device test, calibration on genuine receipts, seller interviews | Not done |
+
+This table is reconciled line by line against the code in [`docs/STATUS.md`](docs/STATUS.md). If they ever disagree, trust the code and fix the table.
 
 ## How it compares
 
-Checkiz is a cheap, low-friction first check. It is not better than the options below overall, and it does not replace them.
+Checkiz is a low-friction first check. It is not better overall than the options below and does not replace them.
 
-| Option | What it is good at | Where Checkiz differs |
+| Option | Good at | Where Checkiz differs |
 |---|---|---|
-| Checking the wallet app by hand ([GCash's own advice: confirm in the Transactions tab](https://mynt.com.ph/newsroom/gcash-warns-public-on-emerging-ai-generated-fake-receipts-scams-urges-users-to-always-check-transactions-tab)) | The most reliable check there is | Too slow to do for every order in a live stream. Checkiz automates the same check from the alert feed and still tells you to confirm large SMS-only payments in the app. |
-| Licensed payment gateways (for example [HitPay](https://hitpayapp.com/ph/), [PayMongo](https://www.paymongo.com/)) | Confirmation comes from the payment system itself, which Checkiz can't match ([HitPay's payment flow](https://docs.hitpayapp.com/apis/guide/online-payments), [PayMongo webhooks](https://docs.paymongo.com/docs/webhooks)) | Gateways need business verification and checkout changes for buyers. Checkiz works with normal personal-wallet transfers. Fees vary by provider, so check their current pricing pages. |
-| Receipt-checking tools | Not assessed: I only found none in two quick searches, which doesn't prove none exist | Checkiz's difference is order binding and screenshot-free settlement, not that it reads receipts. |
+| Checking the wallet app by hand (the advice from GCash and banks) | Most reliable check there is | Slow at volume. Checkiz automates the same comparison from the alert feed and still asks for in-app confirmation of large SMS-only payments |
+| Licensed gateways and GCash for Business (for example [HitPay](https://hitpayapp.com/ph/), [PayMongo](https://www.paymongo.com/blog/how-to-accept-gcash-payments)) | Confirmation comes from the payment system itself, which Checkiz cannot match. Payment links are built for social sellers | Need merchant verification (requirements vary by provider), and buyers pay through the link or QR. Checkiz works with ordinary personal-wallet transfers with no onboarding |
+| Wallet soundbox/payment devices (for example GCash SoundPay) | Audio confirmation that an amount arrived | A static QR shows an amount landed, not which order. I could not confirm whether newer models show dynamic QR (the vendor pages block automated access) |
+| Live-selling and order tools ([BigSeller](https://www.bigseller.com/en_US/index.htm), [EasyStore](https://www.easystore.co/en-ph), [Prosperna](https://www.prosperna.com/)) | Order capture, checkout links, shipping, marketplace reconciliation | Their own documentation, opened 2026-10-23, describes manual confirmation of personal-wallet payments: Prosperna states it [does not auto-detect payments](https://help.prosperna.com/payments/how-to-set-up-direct-transfer-payments), EasyStore's manual path says to [verify and mark the order paid yourself](https://www.easystore.co/en-ph/payments), and BigSeller's ["Payment Reconciliation"](https://help.bigseller.com/en_US/detailPage/what-is-autocheck-payment-certificate.9328) covers marketplace payouts. Not exhaustively verified. Checkiz focuses on tying a payment to an order and could sit beside them |
+| Receipt/slip image verifiers | Exist as a category - [BigSeller's Slip2Go verifies Thai bank transfer certificates](https://help.bigseller.com/en_US/detailPage/what-is-autocheck-payment-certificate.9328) | **Checkiz is not the first receipt checker.** The claim is order binding on personal wallets plus reuse detection |
 
-Adjacent to all of these are order-management apps for social sellers ([BigSeller](https://www.bigseller.com/en_US/index.htm), [EasyStore](https://www.easystore.co/en-ph), [Prosperna](https://www.prosperna.com/)), which handle listings, stock, and shipping across channels. I did not verify whether any of them reconcile personal-wallet payments against orders, so treat that as a gap in this comparison rather than a claim that they don't.
+## Optional AI-assisted reading (planned, off by default)
 
-## Why OCR and image analysis
+Phone photos of screens are where plain OCR is weakest. An optional vision model may read reference, amount and time more accurately. It is **extraction only**: it never decides whether a receipt is real. If it disagrees with standard OCR, the result is "Can't confirm yet". It requires explicit consent, is off by default, and falls back automatically to standard OCR when unavailable. It will be enabled as an option only if a measured comparison on real and edited receipts (including phone photos) shows an improvement; the README will report that result with the number of receipts, including if it shows none. Provider and data terms read before this was written: [`docs/AI_PRIVACY.md`](docs/AI_PRIVACY.md).
 
-Buyers already send screenshots, so reading them is the only way to support the habit sellers have today. OCR extracts the reference and amount, and the forensic check is a secondary signal. The ledger match is the strongest signal and is never overridden by the forensic check. The order-bound settlement path uses no image analysis at all.
+## Privacy and responsible use
 
-## Tech Stack
+- Reading payment notifications or SMS involves personal and financial data. Philippine privacy rules call for consent that is freely given, specific and informed, with the purpose explained. Show a plain consent screen, collect only what matching needs, process locally where possible, and let sellers delete their data. This is not legal advice.
+- Google Play restricts the SMS permission group to default handlers and a few exceptions, and I did not verify its rules for notification access. The prototype is sideloaded, not distributed through Play. See https://support.google.com/googleplay/android-developer/answer/9047303
+- Set `CHECKIZ_API_KEY`. Without it, anyone who can reach the server can post fake alerts. The server warns at startup (`backend/app/main.py:28`).
+- Values that originate in alert text (sender names, reference strings) are neutralised before they reach the packing CSV, so a spreadsheet cannot execute a formula hidden in an SMS.
 
-As built, not as wished for:
+## Limitations
 
-| Layer | Technology |
-|---|---|
-| Frontend | Static HTML/JS dashboard, OBS overlay and QR page - no framework, no build step |
-| Backend | Python 3.10+, FastAPI |
-| OCR | Tesseract via pytesseract (cloud vision is not used) |
-| Image analysis | OpenCV (error-level analysis and Laplacian sharpness) |
-| Database | SQLite, one file |
-| Packaging | Dockerfile with Tesseract installed |
+- **The ledger is only as good as the alert feed.** SMS may not arrive, SMS sender IDs can be spoofed, and the notification path is unproven on a real phone.
+- **Edit detection is weak and uncalibrated.** It may miss AI-generated receipts entirely. Rely on ledger matching.
+- Auto-settlement only covers orders made through Checkiz's QR, and amount-only matching can collide with an unrelated payment of the same amount.
+- The problem description comes from bank, wallet, news and vendor sources, not seller interviews. How often fakes succeed is unmeasured.
+- Receipt layouts and alert wording change when wallets update, so parsers need maintenance.
+- Checkiz is a triage layer, not proof of funds. It does not replace confirming in the wallet app or using a licensed gateway, and it never holds money.
 
-No React, no Firebase, no cloud vision. Keeping it to Python, one SQLite file and a browser is what lets a seller run it on a spare laptop or a phone in Termux.
-
-## Getting Started (Prototype)
-
-This repo is an initial prototype. **Verified on this machine:** the backend suite passes on Python 3.12 (43 tests, `cd backend && pytest`, with OCR stubbed so Tesseract is not needed for the tests), and the Docker image runs end to end with real Tesseract - `samples/edited.png` reads as 9250.00 and returns SUSPECTED FAKE on the ledger mismatch. See Measured results. **Not verified:** the forensic thresholds (untuned, and they do not separate the shipped sample pair), the font check (not built), and anything needing a real phone - the Termux forwarders, the wallet's behaviour with a dynamic QR, and the alert wording the parser expects.
-
-Requires Python 3.10 or newer and Tesseract on the machine running the backend.
+## Getting started
 
 ```bash
 # 1. Install Tesseract (Ubuntu: sudo apt install tesseract-ocr | macOS: brew install tesseract | Windows: UB-Mannheim build, add to PATH)
@@ -141,107 +156,54 @@ uvicorn app.main:app --reload
 
 # 3. Frontend (new terminal)
 cd frontend
-python -m http.server 3000   # open http://localhost:3000
-# From a phone on the same network, point it at the server instead of localhost:
-#   http://<computer-ip>:3000/?api=http://<computer-ip>:8000
+python -m http.server 3000   # open http://localhost:3000  (use ?api=http://<lan-ip>:8000 from a phone)
 ```
 
-Run the tests with `cd backend && pytest` (the verdict engine is tested with stubbed OCR).
+Tests: `cd backend && pytest` (OCR is stubbed, Tesseract not needed). Docker: `docker build -t checkiz . && docker run -p 8000:8000 checkiz`.
 
-**Extras in the prototype**
-- `GET /history` and a dashboard table log every verdict (receipt images are never stored, only the extracted fields and verdict).
-- `frontend/overlay.html` is an OBS Browser Source that shows the latest verdict on stream (`?api=` and `?key=` are optional).
-- **Reconciliation endpoints.** `GET /review`, `POST /review/{order_id}` (acknowledge), `GET /orders/packing.csv` and `GET /orders/{order_id}/evidence`, all behind the same API key as the rest.
-- **Late SMS handling.** A valid receipt with no ledger match is held as PENDING MATCH (`GET /pending`). When the matching SMS arrives at `/ledger/sms`, the order is settled automatically (VERIFIED, or SUSPECTED FAKE on an amount mismatch) and shows up in the history and overlay.
-- **Threshold tuning.** `python calibrate.py --real <folder> --edited <folder>` prints ELA and sharpness for your own screenshots and suggests thresholds if the groups separate.
-- **QR Ph order references** (`frontend/qr.html`, `docs/QR_PH.md`). Register your own wallet QR once, then generate a one-order QR with a fixed amount and the order ID as the reference label, plus an optional centavo code so each open order has a unique amount. A receipt whose coded amount was issued for a different order gets a warning. Receipts can also be captured with the device camera (the QR page can scan your QR the same way).
-- **Timing and stats.** Each verdict reports `elapsed_ms`, and `GET /stats` (shown on the dashboard) gives counts per verdict and average time, so you can report real numbers against the under-5-seconds target.
-- **Alert feed.** See `docs/SMS_FORWARDING.md`, `tools/termux_notification_forwarder.sh` (reads the wallet app's own notification) and `tools/termux_sms_forwarder.sh`. Both scripts are untested on a device. Extra env vars: `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`.
-- **Docker.** `docker build -t checkiz . && docker run -p 8000:8000 checkiz` runs the backend with Tesseract and a seeded ledger. This path is the one used for the Measured results above.
-- Uploads must be images and are capped in size.
-- Set `CHECKIZ_API_KEY` (strongly recommended, since the alert endpoints decide what counts as paid) to lock `/ledger`, `/ledger/*`, `/orders` and `/history` (send `X-API-Key`; the dashboard has a key field). Optional env vars: `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_REF_LENGTH` (default 13), `CHECKIZ_API_KEY` and `CHECKIZ_MAX_UPLOAD_MB` (default 8). See `docs/` for the blueprint and the step-by-step implementation guide.
+A scripted demo on a throwaway database (`backend/demo.py`) is planned and **not in the repo yet**; until it exists, the way to see the logic without a phone is to upload the synthetic samples above. It would use the **synthetic** samples, so it shows the logic, not accuracy on real receipts.
 
-## Demo Scenarios
+Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8).
 
-| Scenario | Input | Expected Output |
+### Demo scenarios
+
+| Scenario | Input | Expected |
 |---|---|---|
-| Real transaction | Unedited GCash receipt | PAYMENT VERIFIED: Ref # 1002 8491 3049 matched with incoming balance of 1,250.00 PHP. |
-| Canva/Photoshop scam | Edited amount (`samples/edited.png`) | SUSPECTED FAKE: "Amount mismatch: receipt 9250.00, ledger 1250.00". Caught by the ledger, not by the image check - see the measured results below. |
-| Edited reference number | A plausible 13-digit reference that never appeared in an alert | PENDING MATCH, not a fake verdict: nothing in the ledger contradicts it. This is the case the prototype does not catch. |
-| Replay attack | Same valid receipt uploaded twice | ALERT: DUPLICATE RECEIPT. Ref # 1002 8491 3049 already claimed on Order #104. |
-| Screenshot-free payment | Buyer pays the exact coded amount of Order #105; no screenshot sent | Auto-settled: payment of 150.37 matches the amount issued for Order #105. |
-| Receipt reused on another order | Real receipt for Order #105 submitted for Order #106 | SUSPECTED FAKE or DUPLICATE: the amount and payment belong to a different order. |
-| Large SMS-only payment | A 9,000 PHP alert arrives over SMS and settles its order | Auto-settled, but the order lands on the review list as CONFIRM IN APP and prints `confirm_in_app=YES` on the packing list. |
-| QR never paid | Order #107's coded amount never appears in the ledger | After `CHECKIZ_ORDER_TTL_HOURS` it shows as NEVER PAID instead of silently staying open. |
-| Dispute | "Did this buyer actually pay?" | `GET /orders/107/evidence` returns the issued QR, the alert that settled it and which source it came from, every verdict, and when it was reviewed. |
+| Screenshot-free payment | Buyer pays the exact coded amount of an order | Auto-settled, no receipt needed |
+| Edited amount | Receipt with a changed amount | Doesn't match: receipt amount differs from the ledger alert |
+| Real receipt for another order | Genuine receipt submitted for a different coded order | Rejected: amount belongs to a different order |
+| Genuine receipt | Matches a ledger alert | Verified |
+| Reused receipt | Same reference again | Reused |
 
-Demo order note: upload `edited.png` before `real.png`, because the edited copy shares the real receipt's reference number and would otherwise be reported as a duplicate.
-
-Which rows were actually observed: the first two ran through real OCR in the Docker run in Measured results. The rest are asserted by tests in `backend/tests/` (`test_verify.py`, `test_settle.py`, `test_review.py`), which stub OCR - so the verdict logic is proven, but the alert wording those tests feed in is written by this repo, not captured from a wallet.
-
-## Measured results
-
-Run end to end in the Docker image with real Tesseract (the tests stub OCR, so these are not test numbers) against the pair `make_samples.py` writes, at the shipped defaults `CHECKIZ_ELA_THRESHOLD=8.0` and `CHECKIZ_SHARPNESS_THRESHOLD=6.0`:
-
-| Sample | OCR read | ELA | Sharpness | Verdict | Time |
-|---|---|---|---|---|---|
-| `samples/real.png` | amount 1250.00, ref `100284913049` | 5.78 | 4.08 | VERIFIED | 582 ms |
-| `samples/edited.png` | amount 9250.00, same ref | 5.82 | 4.08 | SUSPECTED FAKE | 693 ms |
-
-Read this table honestly:
-
-- The `edited.png` verdict came from the ledger, not the image: the receipt said 9250.00 and the matching alert said 1250.00. The forensic scores are 0.04 apart with identical sharpness, so at these thresholds **the image check contributed nothing to catching the edit**.
-- Both samples are synthetic, generated by this repo. These numbers describe the demo images and are not a detection rate for real GCash/Maya screenshots.
-- What this does show: OCR extraction and ledger reconciliation work end to end, and both verdicts came back well inside the 5-second target including OCR (582 ms and 693 ms on the machine used for this run).
-
-`python calibrate.py --real <folder> --edited <folder>` prints the same scores for your own screenshots and suggests thresholds only when the two groups actually separate. Until someone runs it on real receipts, the forensic layer is a signal in the review list, not a detector.
+Each row above is asserted by a test in `backend/tests/`. Demo order note: upload `edited.png` before `real.png`, because the edited copy shares the real receipt's reference number.
 
 ## Roadmap
 
-- [x] Receipt upload and OCR extraction
-- [x] Reference number validation
-- [x] Mock ledger and duplicate detection
-- [x] Compression check (ELA and sharpness)
-- [ ] Font check and threshold tuning on real samples
-- [x] Seller dashboard (basic)
-- [x] Order-bound auto-settlement and live order board
-- [x] Reconciliation review list, packing-list export and per-order evidence log
-- [~] Alert feed: SMS, wallet-app notification and paste endpoints with trust levels (Termux scripts untested on a device; no native app yet)
-- [x] OBS overlay (basic browser source: `frontend/overlay.html`)
-- [~] QR Ph order-reference generator (built on the EMVCo format; wallet behaviour with the order reference is untested)
-- [ ] Provider parsers beyond GCash-style wording (a bank SMS feed, ShopeePay), each with its own samples and tests
-- [ ] Messenger / Viber integration
-- [ ] Hosted setup, so a seller is not asked to run Termux and an API key themselves
-- [ ] Buyer-side payment page that shows the exact coded amount for the order
-- [ ] Recording "I confirmed this in the app" as a step on the order, instead of only warning on screen
+Core (the one user, the one job):
+- [x] OCR extraction, reference validation, replay protection, ledger matching
+- [x] Order-bound QR Ph and alert-driven auto-settlement
+- [x] Alert feed with trust levels, review queue, evidence view, packing CSV
+- [x] Camera capture on the main page (`frontend/camera.js`; the "retake for a clearer photo" hint still needs an OCR confidence signal)
+- [ ] Verdict labels in the API matching the table above
+- [ ] Buyer pay page so the exact amount is easy to pay
+- [ ] `backend/demo.py` scripted demo on a throwaway database
+- [ ] Image fingerprint for reuse detection
+- [ ] Consistency checks that do not need alerts (reference format, amount format, time plausibility, layout)
+- [ ] **Real-device alert test** (`docs/DEVICE_TEST.md`) and fallback: OCR of the seller's own Transactions screen into the ledger
+- [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates
+- [ ] Interviews with a few real sellers to validate the problem
+- [ ] Optional, gated: AI-assisted reading with an evaluation against standard OCR (last priority)
 
-## Limitations
+## Future directions
 
-- **The ledger is only as good as the alert feed.** GCash moved transaction alerts from SMS to the in-app inbox in September 2022, saying the change was to reduce scam texts ([BitPinas](https://bitpinas.com/news/gcash-to-remove-text-alerts-for-each-transaction/), [Newsbytes](https://newsbytes.ph/2022-09-07/gcash-shifts-notifications-from-text-to-app-inbox-to-avoid-scam-messages/)), so which alerts a seller receives depends on their app version and device. Scammers have also sent texts under GCash's sender ID ([Inquirer Technology](https://technology.inquirer.net/139503/hindi-gcash-yan-what-is-sms-spoofing-scam-and-what-you-shoud-do-when-you-see-one)). Checkiz therefore accepts wallet-app notifications and pasted inbox text, marks SMS-only entries as lower trust, and asks for an in-app check on large ones. It does not make a spoofed SMS impossible, so confirm big orders in the app.
-- **The forensic check is not yet a detector.** On the only sample pair the repo ships, its scores do not separate the real receipt from the edited one (see Measured results). Everything the prototype catches today comes from the ledger, the reference format, and duplicate/replay state. Treat the image scores as an extra column in the review list, not as a verdict.
-- Forensic detection is probabilistic and its thresholds are untuned; treat flags as signals, not guarantees.
-- Auto-settlement relies on amounts being unique per open order, so it only covers orders made through Checkiz's QR page.
-- Notification-reading and wallet behavior with QR Ph order references are untested on real devices.
-- **Only one provider's wording is exercised.** The design is provider-independent, the parsers are not: alert text and receipt layouts are matched with regexes written against GCash-style samples. Bank and ShopeePay feeds need their own parser plus tests before being claimed.
-- Receipt layouts and alert wording change when any provider updates their app, so parsers need maintenance.
-- Checkiz is a triage layer, not proof of funds. It does not replace confirming in the app the money arrived in - wallet or bank - or using a licensed gateway.
-
-## Sources
-
-Checked October 2026; only links that resolved and whose content supports the sentence they sit in are listed.
-
-- [GCash warns public on emerging AI-generated fake receipts scams, urges users to always check Transactions tab](https://mynt.com.ph/newsroom/gcash-warns-public-on-emerging-ai-generated-fake-receipts-scams-urges-users-to-always-check-transactions-tab) - Mynt newsroom, 14 Jul 2025. The wallet provider's own guidance, which is why Checkiz defers to an in-app check instead of claiming to replace it.
-- [GCash to remove text alerts for each transaction](https://bitpinas.com/news/gcash-to-remove-text-alerts-for-each-transaction/) - BitPinas, 2 Sep 2022, and [GCash shifts notifications from text to app inbox to avoid scam messages](https://newsbytes.ph/2022-09-07/gcash-shifts-notifications-from-text-to-app-inbox-to-avoid-scam-messages/) - Newsbytes, 7 Sep 2022. Why the alert feed is a trust-tiered design problem, not a solved one.
-- [Hindi GCash yan: What is SMS spoofing scam](https://technology.inquirer.net/139503/hindi-gcash-yan-what-is-sms-spoofing-scam-and-what-you-shoud-do-when-you-see-one) - Inquirer Technology, 27 Dec 2024. Why SMS-only entries carry `needs_app_check`.
-- [P1.4M online tire scam suspect collared](https://tribune.net.ph/2026-10-16/p14-m-online-tire-scam-suspect-collared) - Tribune, 16 Oct 2026. Online selling fraud at MSME scale is current.
-- Payment-side alternatives: [HitPay PH](https://hitpayapp.com/ph/) and its [online payments guide](https://docs.hitpayapp.com/apis/guide/online-payments), [PayMongo](https://www.paymongo.com/) and its [webhooks docs](https://docs.paymongo.com/docs/webhooks).
-- Why order binding is not wallet-specific: [PayMongo's QR Ph explanation](https://docs.paymongo.com/docs/payment-acceptance-qr-ph) and [QR Ph](https://en.wikipedia.org/wiki/QR_Ph) on Wikipedia - a BSP-supervised national standard payable from bank and e-money accounts alike.
-- Adjacent order tooling: [BigSeller](https://www.bigseller.com/en_US/index.htm), [EasyStore PH](https://www.easystore.co/en-ph), [Prosperna](https://www.prosperna.com/).
-
-Not used, for the record: the BSP's own [QR Ph P2P FAQ](https://www.bsp.gov.ph/Media_and_Research/Primers%20Faqs/QR_Ph_P2P_FAQs.pdf) is the right primary source but returns 403 to non-browsers, so it is cited only through the two pages above; GCash Help Center articles also 403; the PNP anti-scam advisories are Facebook-only; a PhilStar spoofing piece 404s; and an August 2026 report on Apple Pay entering the Philippines 403s, so it is not referenced. No fee percentages are quoted anywhere in this README because none could be confirmed from a primary page.
+Not built, not validated, and deliberately out of scope for now:
+- **Stores with staff:** employees photograph customers' receipts; the owner wants to catch fake receipts and mismatches between logged sales and received payments. It would need staff PINs, a record of who submitted each check, and end-of-day reconciliation in both directions. Keep the alert feed on the owner's device, and treat flags as prompts for a human to look, not proof against an employee. This also competes with counter devices such as wallet soundboxes.
+- **Verified sales record:** an export of settled orders for bookkeeping and possibly, later, access to credit. Whether lenders would accept it is unknown.
+- **Messenger / Viber intake.**
+- **Freelancers:** not researched; their payments are typically fewer and invoice-based, which is a different problem.
 
 ## License
 
-MIT (change if needed).
+MIT.
 
-Checkiz is an independent project and is not affiliated with GCash, Maya, ShopeePay, any bank, or any other payment provider. Those names appear only to describe where a seller's money usually comes from.
+Checkiz is an independent project and is not affiliated with GCash, Maya, or any other e-wallet provider.
