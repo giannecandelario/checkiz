@@ -42,15 +42,22 @@ def parse_sms(text: str):  # kept for older callers and tests
     return parse_alert(text, "sms")
 
 def add_entry(entry: dict):
+    """True when this payment was new to the ledger, False when the copy already
+    there was kept.
+
+    The two have to stay countable apart: `INSERT OR IGNORE` deliberately keeps the
+    first copy, so a replay stores nothing, and a number that counts it as added tells
+    a seller they were paid twice."""
     with get_conn() as conn:
         # INSERT OR IGNORE keeps the first copy, so a replayed alert cannot reset
         # which order already consumed it.
-        conn.execute(
-            "INSERT OR IGNORE INTO ledger (ref, amount, received_at, sender, raw, source) "
-            "VALUES (?, ?, datetime('now'), ?, ?, ?)",
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO ledger (ref, amount, received_at, sender, raw, source, printed_at) "
+            "VALUES (?, ?, datetime('now'), ?, ?, ?, ?)",
             (entry["ref"], entry["amount"], entry.get("sender"), entry.get("raw"),
-             entry.get("source", "sms")),
+             entry.get("source", "sms"), entry.get("printed_at")),
         )
+        return cur.rowcount > 0
 
 def find_entry(ref: str):
     with get_conn() as conn:

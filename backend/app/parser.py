@@ -19,6 +19,14 @@ DATE_RE = re.compile(rf"(\d{{4}}-\d{{2}}-\d{{2}}"
 TIME_RE = re.compile(r"(?<![\d:.])(\d{1,2}:\d{2}(?::\d{2})? ?(?:[AP]\.?[Mm]\.?)?)(?![\d:])")
 
 def load_image(data: bytes):
+    """The picture these bytes claim to be, or None when they are not a picture.
+
+    The empty check is not paranoia: `cv2.imdecode` returns None for any unreadable
+    body but *raises* on zero-length input, so a 0-byte upload reached the seller as a
+    500 with nothing to act on. Nothing arrived is the same answer as something that
+    was not a picture arrived."""
+    if not data:
+        return None
     arr = np.frombuffer(data, np.uint8)
     return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 

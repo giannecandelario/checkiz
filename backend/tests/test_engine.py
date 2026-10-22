@@ -105,3 +105,14 @@ def test_upload_limits_and_stats(monkeypatch, png):
         assert c.post("/verify", files=files(png), data={"order_id": "303"}).status_code == 413
         s = c.get("/stats").json()
         assert s["total"] == 1 and s["by_status"]["PENDING_MATCH"] == 1
+
+def test_an_empty_upload_is_an_unreadable_receipt_not_a_crash(monkeypatch):
+    """0 bytes used to reach OpenCV, which raises on an empty buffer rather than
+    returning None like it does for any other unreadable body, and the seller got a
+    500 with nothing to act on."""
+    stub_ocr(monkeypatch, "")
+    with TestClient(app) as c:
+        r = c.post("/verify", files={"file": ("r.png", b"", "image/png")},
+                   data={"order_id": "304"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "SUSPECTED_FAKE" and "readable" in r.json()["message"].lower()

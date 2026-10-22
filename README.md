@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 170 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 196 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, and no table in it has been filled. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -78,9 +78,18 @@ On the shipped *synthetic* sample pair (not real receipts), at default threshold
 | `real.png` | 5.78 | 4.08 | 94.5 | VERIFIED | 582 ms |
 | `edited.png` | 5.82 | 4.08 | 94.6 | SUSPECTED FAKE | 693 ms |
 
-**The forensic check did not separate the two.** The edited receipt was caught only because its amount (9250.00) did not match the ledger alert (1250.00). Thresholds need calibration on genuine receipts before any claim about edit detection. `backend/calibrate.py` supports this.
+**The forensic check did not separate the two.** The edited receipt was caught only because its amount (9250.00) did not match the ledger alert (1250.00). Thresholds need calibration on genuine receipts before any claim about edit detection. [`docs/CALIBRATION.md`](docs/CALIBRATION.md) is the guide and `backend/calibrate.py` is the script.
 
 The read-score column is today's run (Tesseract 5.5.0 in the same image, the default confidence floor of 60): neither photo is anywhere near it, and the edited copy scored marginally higher, so confidence says nothing about tampering. That run also read the printed date and time out of real OCR rather than a stub - `Oct 22, 2026` and `10:14 AM` on both samples - though the pages themselves are still the synthetic renders, not a wallet's receipt.
+
+The same pair measured through `calibrate.py` itself, which is the shape a real run pastes into (Tesseract 5.5.0, thresholds ELA > 8.0 / sharpness > 6.0, n = 1 and 1, run date 2026-10-22 as the container keeps UTC):
+
+| Sample | Group | ELA | Sharpness | Read score | Flagged at these thresholds | Time |
+|---|---|---|---|---|---|---|
+| `real.png` | real | 5.78 | 4.08 | 94.5 | not flagged | 610 ms |
+| `edited.png` | edited | 5.82 | 4.08 | 94.6 | not flagged | 550 ms |
+
+The "not flagged" column is the bold sentence above, in the script's own words: at the shipped thresholds neither image is flagged, so the edited copy is invisible to the forensics. `--at 5.8 4.09` on these two files does flag the edited one, and the script refuses to turn that into a recommended threshold, because n = 1 per group is not a measurement.
 
 ## What makes it different: order binding
 
@@ -94,7 +103,7 @@ Limits: it only covers orders made through Checkiz's QR page. The wallet may ign
 
 ## How it works
 
-1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, or (c) pasted text. Each entry records its source, and sources have different trust (see below).
+1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, (c) pasted text, or (d) a screenshot of the wallet's own transaction list when none of the first three arrives. Each entry records its source, and sources have different trust (see below).
 2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number, the amount, and the date and time printed on the receipt. The file's hash is compared with earlier checks, then reference format and replay, then the ledger. Alongside the verdict, the receipt is also read against itself (see **Signals, not proof** below), and the photo is scored for legibility (see **When the photo, not the receipt, is the problem**).
 3. **Settlement:** a ledger match (or an alert that matches an open coded order) settles the order. The order is locked to that payment.
 4. **Review queue:** anything unresolved, suspicious, duplicate, or needing an in-app confirmation is listed for the seller. Receipt images are not stored, only extracted fields and the verdict.
@@ -106,8 +115,9 @@ Limits: it only covers orders made through Checkiz's QR page. The wallet may ign
 | Wallet-app notification | `POST /ledger/notification` | Highest | Android sets the package name, so a texter cannot fake it. Package allow-list: `CHECKIZ_APP_PACKAGES` |
 | SMS | `POST /ledger/sms` | Medium | Sender IDs can be spoofed. Large SMS-only payments return `needs_app_check` |
 | Pasted text | `POST /ledger/paste` | Medium | Fallback, for example text copied from the in-app inbox |
+| Your own transactions screen, screenshotted | `POST /ledger/history-screenshot` | Lowest | Reads the list row by row (reference, amount, time) when nothing arrives at all. Unsigned, OCR'd off an image, and a reference can attach to the wrong amount on a crooked list, so it is never treated as the wallet confirming anything |
 
-GCash moved send-money and other confirmations from SMS to its app inbox starting in 2022, so **SMS may not arrive at all**. Check what your own phone receives. Whether the wallet app posts a push notification for each incoming payment is **unconfirmed** and needs a real-device test (`docs/DEVICE_TEST.md` is still to be written - see the roadmap).
+GCash moved send-money and other confirmations from SMS to its app inbox starting in 2022, so **SMS may not arrive at all**. Check what your own phone receives - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, with the tables to fill in. Whether the wallet app posts a push notification for each incoming payment is **still unconfirmed: nobody has run that protocol yet**, and every table in it is empty on purpose.
 
 The tool is not tied to one wallet: reconciliation keys on reference and amount, trusted apps and reference length are configurable (`CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH`), and order binding uses QR Ph, which is payable from bank and e-money apps. Parsers currently require a `PHP`/`₱` amount with two decimals, an English money-in word (`received`, `credited`, `money in`, `you got`) and a `Ref` label; without a reference label an entry gets a synthetic key and loses replay detection.
 
@@ -119,9 +129,10 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Replay protection (a reference is locked to one order) | Built, tested |
 | Ledger match, late-alert resolution of pending receipts | Built, tested |
 | Order-bound QR Ph generator, auto-settlement from alerts | Built, tested; wallet behaviour with the order reference untested |
-| Alert feed: notification, SMS, paste endpoints with trust levels | Built, tested; phone forwarders untested on a device |
+| Alert feed: notification, SMS, paste and transactions-screenshot endpoints with trust levels | Built, tested; phone forwarders untested on a device |
+| Transactions-screenshot fallback (`POST /ledger/history-screenshot`, reads a list row by row) | Built, tested with stubbed OCR ([`backend/tests/test_history.py`](backend/tests/test_history.py)); run once through real Tesseract on a **synthetic** rendered Transactions screen ([`docs/STATUS.md`](docs/STATUS.md) "The fallback, run for real"). Never run against a real wallet screenshot |
 | Review queue, evidence view, packing list CSV | Built, tested |
-| Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration |
+| Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration. `backend/calibrate.py` prints a measured table and refuses to suggest a threshold on too few samples ([`docs/CALIBRATION.md`](docs/CALIBRATION.md)) |
 | Dashboard, order board, OBS overlay | Built (basic). Served by the API itself; the panels have no automated tests |
 | One origin for the pages and the API, with a stated reason when a request fails | Built. Serving tested in `tests/test_serving.py`; the page-side helper was executed against a stubbed browser, not clicked through |
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), its failure paths executed against a stubbed camera - still needs a real phone |
@@ -133,7 +144,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Reuse by perceptual image hash | **Not built.** Measured on template-identical receipts and rejected: a different payment hashes closer than a re-saved copy. Numbers in [`docs/STATUS.md`](docs/STATUS.md) |
 | Consistency checks that need no alert (reference format, amount range, printed time, layout) | Built, tested as signals only ([`backend/app/consistency.py`](backend/app/consistency.py)). Never checked against real receipts, so the thresholds are guesses |
 | Optional AI-assisted reading (extraction only, off by default, gated by evaluation) | Planned |
-| Real-device test, calibration on genuine receipts, seller interviews | Not done |
+| Real-device test, calibration on genuine receipts, seller interviews | **Protocol and guide written, not run.** [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) and [`docs/CALIBRATION.md`](docs/CALIBRATION.md) say what to measure and where the numbers go; every results table in them is empty, because nobody has measured anything on a phone yet |
 
 This table is reconciled line by line against the code in [`docs/STATUS.md`](docs/STATUS.md). If they ever disagree, trust the code and fix the table.
 
@@ -208,6 +219,7 @@ Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECK
 | Reused receipt | Same reference again | Reused |
 | Receipt that contradicts itself | Amount outside the shop's set range, or a printed time later than this clock | Verdict unchanged, the reason listed under `signals` |
 | Photo that reads poorly | The reader's own mean score falls under the floor (the test reads it at 34/100) | Verdict unchanged, one extra line: retake it |
+| Alerts never arrived | Screenshot of the seller's own transaction list uploaded | Its incoming rows enter the ledger as `history`; money-out rows are refused with a reason; uploading the same screen again adds nothing |
 
 Each row above is asserted by a test in `backend/tests/`. Demo order note: upload `edited.png` before `real.png`, because the edited copy shares the real receipt's reference number.
 
@@ -224,8 +236,9 @@ Core (the one user, the one job):
 - [x] Reuse detection by identical file (hash of the upload; the image is not stored)
 - [ ] ~~Image perceptual hash for reuse~~ measured and rejected - it cannot tell two different receipts apart. Details in `docs/STATUS.md`
 - [x] Consistency checks that do not need alerts (reference format, amount format and range, printed time, layout) - reported as signals beside the verdict; their thresholds are still guesses until real receipts are measured
-- [ ] **Real-device alert test** (`docs/DEVICE_TEST.md`) and fallback: OCR of the seller's own Transactions screen into the ledger
-- [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates - including `CHECKIZ_OCR_CONFIDENCE_MIN`, which has never been measured on a phone photo
+- [x] **Alert-feed fallback built:** OCR of the seller's own Transactions screen into the ledger (`POST /ledger/history-screenshot`), tested with a stubbed reader and once against real Tesseract on a synthetic screen
+- [ ] **Real-device alert test** - the protocol is written ([`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md)); it has not been run on a phone, and its tables are empty
+- [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates - the script and the guide exist ([`docs/CALIBRATION.md`](docs/CALIBRATION.md)), the samples do not. Including `CHECKIZ_OCR_CONFIDENCE_MIN`, which has never been measured on a phone photo
 - [ ] Interviews with a few real sellers to validate the problem
 - [ ] Optional, gated: AI-assisted reading with an evaluation against standard OCR (last priority)
 

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from .db import init_db
 from .config import APP_PACKAGES
+from .history import screenshot, to_entry
 from .ingest import ingest_alert
 from .ledger import parse_alert, list_entries
 from .parser import ocr_engine
@@ -140,7 +141,58 @@ def ledger_paste(body: SMSIn):
             out.append(ingest_alert(entry))
     if not out:
         raise HTTPException(400, "No incoming payments found in that text")
-    return {"added": len(out), "entries": out}
+    return {"added": sum(1 for e in out if e["stored"]), "entries": out}
+
+@app.post("/ledger/history-screenshot", dependencies=[Depends(require_key)])
+async def ledger_history_screenshot(file: UploadFile = File(...)):
+    """The fallback when no alert reaches the server at all: a screenshot of the
+    SELLER'S OWN wallet Transactions/Activity screen, read row by row into the ledger.
+
+    `source="history"` is the lowest-trust source there is - words taken off an image
+    by OCR, unsigned, and a reference can land on the wrong amount when the list is
+    crooked. It is never treated as the wallet confirming a payment: `app_check_warning`
+    still flags any payment at or above CHECKIZ_CONFIRM_ABOVE that was not read from a
+    wallet app notification, including one seen only here."""
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(415, "Upload an image file")
+    limit = int(float(os.getenv("CHECKIZ_MAX_UPLOAD_MB", 8)) * 1024 * 1024)
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise HTTPException(413, "Image too large")
+    try:
+        found = screenshot(data)
+    except TesseractNotFoundError:
+        raise HTTPException(503, "This server cannot read any screenshot: Tesseract is not "
+                                 "installed or not on its PATH. Install tesseract-ocr, or run "
+                                 "the Docker image. Nothing was added to the ledger.")
+    if found is None:
+        raise HTTPException(415, "That file is not an image this server can decode")
+    rows, skipped = found
+    if not rows:
+        # Telling the seller that figures were read and refused is the difference
+        # between "wrong screen" and "the parser was not sure", which they can act
+        # on differently.
+        why = f" {len(skipped)} figure(s) read and refused: " + \
+              ", ".join(sorted({s["reason"] for s in skipped})) + "." if skipped else ""
+        raise HTTPException(400, "No incoming payment could be placed in that screen." + why +
+                            " Send a screenshot of the wallet's own Transactions/Activity "
+                            "list with the whole list on screen and the text sharp enough "
+                            "to read.")
+    out = [ingest_alert(to_entry(r)) for r in rows]
+    return {"added": sum(1 for e in out if e["stored"]),
+            "entries": out, "source": "history",
+            # The first copy of a reference wins, so a transaction the ledger already
+            # had (from an SMS, or from the same screenshot an hour ago) stores nothing.
+            # Counting those as added would tell the seller they were paid again.
+            "already_in_ledger": [e["ref"] for e in out if not e["stored"]],
+            # Rows refused and why, so a payment the parser was unsure about is
+            # visible instead of silently absent.
+            "skipped": skipped,
+            # Payments *this screen* added that nothing matched, so the seller sees
+            # them without clicking through the ledger to find which ones. A reference
+            # the ledger already had is not listed again: nothing about it changed here.
+            "unmatched": [e["ref"] for e in out if e["stored"]
+                          and not e["resolved"] and not e["settled"]]}
 
 @app.get("/ledger", dependencies=[Depends(require_key)])
 def ledger():

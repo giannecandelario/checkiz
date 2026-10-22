@@ -1,6 +1,6 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23 against `fix/ui-runtime`. Suite: **170 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite: **196 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
@@ -11,7 +11,9 @@ Written 2026-10-23 against `fix/ui-runtime`. Suite: **170 tests passing** (`cd b
 | Replay protection (one reference, one order) | Yes | `ledger.consumed_order`, `verify.py` DUPLICATE branch | `test_engine.py::test_verified_then_duplicate`, `test_settle.py::test_one_payment_settles_one_order_only`, `test_real_receipt_cannot_be_reused_on_another_order` |
 | Ledger match, late-alert resolution | Yes | `backend/app/ingest.py`, `verify.py::resolve_pending` | 3 tests in `test_engine.py`, 1 in `test_settle.py` |
 | Order-bound QR Ph + centavo codes | Yes | `backend/app/qrph.py`, `qrstore.py`, `qr_orders` table | `test_qr.py` (5), `test_settle.py::test_auto_settle_without_screenshot`, `test_receipt_amount_must_match_issued_amount` |
-| Alert feed: notification / SMS / paste, trust levels | Yes | `main.py` routes at lines 91, 101, 112; `CHECKIZ_APP_PACKAGES` allow-list; paste splits on blank lines | `test_engine.py`, `test_settle.py` trust tests, `test_api_key_protects_ledger` |
+| Alert feed: notification / SMS / paste, trust levels | Yes | `main.py` routes at lines 112, 122, 133; `CHECKIZ_APP_PACKAGES` allow-list; paste splits on blank lines | `test_engine.py`, `test_settle.py` trust tests, `test_api_key_protects_ledger` |
+| `added` counts payments the ledger did not already hold | Yes | `ledger.add_entry` returns `cursor.rowcount > 0` (the insert was already `INSERT OR IGNORE`, so the information existed and was being thrown away), threaded through `ingest_alert` as `stored`; `/ledger/history-screenshot` reports `added`, `already_in_ledger` and `unmatched`, `/ledger/paste` reports `added` | `test_history.py::test_the_same_screenshot_twice_adds_one_payment`, `::test_a_payment_an_sms_already_reported_is_not_counted_again`, `::test_the_screenshot_reports_what_it_added_and_what_it_refused`. Found by the live Docker run, not by a test - see "Corrections" |
+| **Transactions-screenshot fallback** (brief task 5) | Yes | `backend/app/history.py` (`scan`, `parse_history_rows`, `to_entry`, `screenshot`), `POST /ledger/history-screenshot` at `main.py:146`, ledger column `printed_at` (`db.py` migration), upload control in `frontend/index.html` | `test_history.py` (24): rows read across separate lines, money-out refused, a figure with no direction word refused, the closest-word direction rule in both directions, no sender names taken, refusals reported, `source="history"` end to end, a history payment settling a coded order while still being told to confirm in the app, `printed_at` kept apart from `received_at`, replay adds nothing (both from the same screen and against a reference an SMS already stored), 400/413/415/503, API key, and that the dashboard can reach it. **Real Tesseract run once**, on a synthetic rendered transactions screen (see "The fallback, run for real") |
 | `needs_app_check` persisted, incl. the late-alert path | Yes | `verifications.needs_app_check`, `verify.py:49`, `ingest.py` | `test_settle.py::test_sms_only_large_payment_needs_app_check`, `test_app_sourced_large_payment_needs_no_extra_check`, `test_review.py::test_late_sms_match_is_queued_for_app_check` |
 | Review queue, acknowledge + reopen | Yes | `backend/app/review.py`, `GET /review`, `POST /review/{id}` | 8 tests in `test_review.py` |
 | Packing list CSV, formula-injection neutralised | Yes | `backend/app/report.py`, `GET /orders/packing.csv` | `test_review.py::test_packing_csv_*` (2) |
@@ -28,8 +30,9 @@ Written 2026-10-23 against `fix/ui-runtime`. Suite: **170 tests passing** (`cd b
 | `/health` | Yes | `main.py:80`, answering `ok`, `name`, `ui` and `ocr` | `test_serving.py::test_health_names_the_server_so_a_page_can_tell_it_apart`, `test_no_ocr.py` for `ocr`, plus the API smoke test |
 | Plain-language verdict `label` field | Yes | `backend/app/labels.py`; `label` on every verdict response, late-alert resolution, auto-settlement result, history row, review item and evidence event; `verifications.label` column with migration; `/stats` also returns `by_label`; shown in `index.html` and `overlay.html`. Upload rejections (415/413) are HTTP errors and carry no verdict | `test_labels.py` (19). Status codes are unchanged and still asserted |
 | Buyer pay page (`/pay/{order_id}`, `qr.png`, `pay.html`) | **No** | - | Brief Step 0 lists it; README claimed it Built |
+| `docs/DEVICE_TEST.md` (brief task 5's protocol) | **Yes, and every table in it is empty** | Four parts: A observes which channels a PHP 1.00 payment actually arrives on (`termux-sms-list`, `termux-notification-list` for the package name), B posts that wording into `/ledger/sms` and `/ledger/notification`, C runs the screenshot fallback, D uploads a phone photo of a customer's screen. Privacy section: PHP 1.00 only, no real screenshot or reference committed, samples kept outside the repo | Not testable here, and not claimed: **nobody has run it**. The file opens by saying so. `test_history.py::test_the_dashboard_can_upload_a_transactions_screen` only proves the fallback is reachable from the page |
+| `docs/CALIBRATION.md` + `backend/calibrate.py` (brief task 6) | Yes | The guide says what to collect (5+ per group, including the phone-photo and Messenger/Viber-compressed copies), where to run the script (the Docker image, because this machine has no Tesseract), and the rule that a threshold is only proposed at n>=3 per group **and** real separation. `calibrate.py` gained `--markdown` (the README-shaped table), `--at ELA SHARPNESS` (false alarms / caught / missed, as counts with the file names), a no-engine guard that exits 2, and `no boxes` instead of a flattering `0.00` | No test covers the script itself. It has been run - see "Calibration: what the script has actually measured" - but only on the two shipped synthetic samples, which is n=1 per group and therefore prints no threshold |
 | Scripted demo (`backend/demo.py`) | **No** | - | README's "Getting started" references a file that does not exist |
-| `docs/DEVICE_TEST.md` | **No** | - | Referenced twice in the README |
 | Exact-file reuse check (SHA-256 of the upload) | Yes | `backend/app/fingerprint.py`, `verifications.sha256` + index, runs before the reference gate in `verify.py` | `test_fingerprint.py` (7), incl. the limits pinned below |
 | Image perceptual hash (dHash) | **No - measured and rejected** | - | See "Perceptual hash: the measurement" below |
 | Alert-free consistency checks | Yes, as **signals only** | `backend/app/consistency.py` (4 pure checks), collected in `verify._verify`, returned as `signals` on every verdict, stored in `verifications.signals` (+ `printed_at`), shown in the dashboard banner, review queue, evidence timeline and as a count on the overlay. Every threshold is a config value | `test_consistency.py` (50): each check on its own, then the same verdict with and without a signal, storage, and the legacy-row path. **No real receipt has been through them** - see "Signals: what was decided and why" |
@@ -50,6 +53,53 @@ Written 2026-10-23 against `fix/ui-runtime`. Suite: **170 tests passing** (`cd b
 - Two README sentences said the receipt parser reads only a reference and an amount ("there is no time field yet", and the same claim in the AI section as something a model would have to prove). Both became false the moment the consistency checks needed a printed time: `parse_fields` now returns `date` and `time`. The AI paragraph now claims only what is left - that a model has to prove it reads a glare-covered phone photo better.
 - **"Receipt upload and OCR extraction | Built, tested"** read as though the parsing itself were tested. It is not: every test stubs the reader, because Tesseract is not installed on this machine. The row now says tested with the OCR stubbed and names where real Tesseract was actually run (the Docker image, the synthetic samples).
 - **"the Docker build"** was listed under what no test covers. It has now been run once for the path this round changed - `docker build`, `docker run -p 8123:8000`, `/health` reporting `ocr: "5.5.0"`, `GET /` serving the dashboard, and one real upload returning `VERIFIED`. Removed from that list and recorded in "A server that could not read anything". It is one run on synthetic data, not a Docker test suite.
+- **`added` counted rows the parser read, not rows the ledger gained.** The first live upload of a transactions screen answered `{"added": 2, ...}` when one of the two references was already in the ledger as an SMS - and the stored row kept `source: "sms"`, while the response echoed `source: "history"` for it. A seller reading "2 payments" would think a re-screenshot was a second payment. `INSERT OR IGNORE` already knew the difference (`rowcount` 0 vs 1) and `add_entry` threw it away. Now `added` counts new rows only, the repeats are named in `already_in_ledger`, and `/ledger/paste` uses the same honest number. Two tests pin it, and both were written after the live run showed the wrong answer.
+- **A 0-byte upload crashed `/verify` with a 500.** `cv2.imdecode` returns None for junk bytes but *raises* `(-215:Assertion failed) !buf.empty()` on an empty buffer, so the one input shape the guard did not cover was the one a truncated camera capture or a dropped file produces. Found by writing the fallback's "not a picture" test first: it failed with a 500 traceback. `parser.load_image` now returns None for empty bytes, `/verify` answers its existing "Unreadable image" verdict, and the screenshot endpoint answers 415. Two tests for `load_image`, one for each endpoint.
+- **A direction test that passed for the wrong reason.** With the money-out guard deleted entirely, all 19 tests still passed: the `Sent PHP 500.00` row was being refused by the *no-direction-word* guard, so nothing asserted that outgoing money is excluded on purpose. The rule was rewritten to the closest direction word in the row's window, the test text was given a wallet word so only the direction guard can refuse it, and two more tests were added (a payment listed next to an outgoing row, and a tie). Removing the guard then failed 5 tests.
+- **`docs/DEVICE_TEST.md` was recorded here as not existing** while README referenced it twice. It exists now, and its tables are empty; the row above says which is claimed and which is not.
+
+## The fallback, run for real
+
+The suite stubs the reader, so the row parser had only ever seen text typed by hand. It was run against real Tesseract 5.5.0 in the Docker image on 2026-10-23, on a **synthetic** screen: `/tmp/mk_transactions_screen.py` (Pillow, not in the repo) drew a 720x900 "Transactions" list with three rows - Received PHP 1,250.00 / ref 1002 849 130490, Sent PHP 500.00 / ref 1002 849 130491, Received PHP 150.37 / ref 1002 849 130492 - and the PNG was posted to `POST /ledger/history-screenshot` over HTTP. No wallet produced this image and it is not a wallet's layout; what it proves is that the parser works on text that came out of an OCR engine rather than out of a test.
+
+What Tesseract handed back and what the parser did with it, from the first response (fresh container database, so `seed.py` had already stored the 1,250.00 reference as an SMS alert):
+
+```
+added 1
+already_in_ledger ['1002849130490']
+unmatched ['1002849130490', '1002849130492']
+skipped [('money out', 500.0)]
+```
+
+- The reference the engine read was **grouped, not contiguous** - `"Ref No. 1002 849 130491"` - and the raw string stored with the refused row shows it verbatim. The reader splits digit groups, so grouping is not a problem for this path. Worth knowing because the grouped form is what a real wallet prints.
+- The outgoing row was refused for the right reason and reported, not silently dropped. `PHP 150.37` became one new ledger row with `source: "history"`, and `GET /ledger` showed its printed time kept separate from the server's clock: `1002849130492 history 150.37 'Oct 21, 2026 18:41 PM'`.
+- Both received amounts are listed `unmatched` because the seeded mock orders do not carry those centavo codes. That is the correct answer, not a gap: a payment with no order of its own is stored and waits.
+- Uploading the same screenshot again answered `added 0 already ['1002849130490', '1002849130492']` - the replay adds nothing.
+- The same file posted with no `X-API-Key` answered **401**.
+
+Before the `added` fix above, this same run answered `added: 2` on a database that already held one of the two references, which is how the overstatement was caught. A second live run against a container that was still writing into the gitignored `backend/checkiz.db` (the mount was read-write) showed `already_in_ledger` reporting both and the stored 1,250.00 row keeping `source: "sms"`; that row was deleted afterwards and the file left with its 4 seeded rows. The third run used `-e CHECKIZ_DB_PATH=/tmp/live.db` with the backend mounted `:ro`, which is the way to do this without touching a host database.
+
+## Calibration: what the script has actually measured
+
+Brief task 6 says do not invent numbers, so the record of what exists is short. The rewritten `calibrate.py` was run in the Docker image against the only receipts in this repo - the two synthetic samples in `samples/`, one clean and one with the amount redrawn - on 2026-10-23. The date the script prints is the container's UTC date, 2026-10-22. What follows is its output, with the two long suggestion lines re-wrapped for width and the six `summary()` lines between them left out:
+
+```
+# Tesseract 5.5.0  run 2026-10-22  thresholds ELA > 8.0, sharpness > 6.0  retake floor 60.0  n real=1 edited=1
+file=real.png   ref=1002849130490  amount=1250.0  ela=5.78  sharp=4.08  read=94.5  boxes=4  ms=738
+file=edited.png ref=1002849130490  amount=9250.0  ela=5.82  sharp=4.08  read=94.6  boxes=4  ms=635
+
+CHECKIZ_ELA_THRESHOLD: n=1/1 is too few to set a threshold on. The groups do not overlap here
+(real max 5.78 < edited min 5.82), but two samples that happen to differ is not a signal -
+measure more before changing it.
+
+CHECKIZ_SHARPNESS_THRESHOLD: n=1/1 is too few to set a threshold on. They overlap (real max
+4.08 >= edited min 4.08), and with this few samples even that is not yet a conclusion.
+```
+
+So the ELA groups are 0.04 apart and the sharpness groups are identical - on a pair of images one script drew. Pointing `--at 5.8 4.09` at them reports "false alarms: 0 of 1, caught: 1 of 1, missed: 0 of 1", which is exactly the number that must not go in the README: one clean page and one redrawn page cannot tell you a rate, and a threshold placed 0.02 under a single genuine reading is a coin flip. The script refuses to suggest one at n<3 per group, and the refusal is the output.
+
+Nothing else has been measured. `samples_real/` and `samples_edited/` do not exist, no genuine receipt has been through the forensics, `docs/CALIBRATION_RESULTS.md` has not been written, and the README keeps "the forensic check did not separate the two". The guide's job is to make the next run produce a table that can replace that sentence; until someone collects samples, the sentence stays.
+
 
 ## Perceptual hash: the measurement that killed it
 
@@ -329,4 +379,10 @@ the sample's own wording, which is the calibration gap in "Signals" above, not a
 
 ## What no test covers
 
-The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 170 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples and one synthetic transactions screen have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 196 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+
+Three things this round added and still does not cover:
+
+- **`calibrate.py` is not tested at all.** Its guards are the ones that matter - no Tesseract, no samples, no boxes, n<3 - and each was only ever checked by running it and reading what it printed. A future edit can make it invent a threshold and no test would notice.
+- **`docs/DEVICE_TEST.md` has no results in it.** Every table is empty because nobody has run the protocol, and nothing in the file is an observation. The parser tests use alert text written to match an assumption about what a wallet says.
+- **The screenshot fallback has been run on one synthetic screen, once.** Not on a wallet's Transactions list, not on a phone photo of a screen, not on a crooked or scrolled list, and not on a screen whose rows have a balance column beside the amount - which is the shape `test_a_balance_column_does_not_beat_the_amount` only guesses at.

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     sender TEXT,
     raw TEXT,
     source TEXT DEFAULT 'sms',
+    printed_at TEXT,
     consumed_order TEXT
 );
 CREATE TABLE IF NOT EXISTS claims (
@@ -96,6 +97,11 @@ def init_db():
             ("verifications", "printed_at", "TEXT"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
+            # The time the wallet printed on the row, when it was read off a
+            # transactions screenshot. Kept apart from received_at - "when Checkiz
+            # saw this" and "when the payment happened" are days apart on a screen
+            # full of old rows, and collapsing them makes an old payment look new.
+            ("ledger", "printed_at", "TEXT"),
             ("qr_orders", "status", "TEXT DEFAULT 'OPEN'"),
             ("qr_orders", "paid_ref", "TEXT"),
             ("qr_orders", "paid_at", "TEXT"),

@@ -146,7 +146,8 @@ Known limits: screenshots are re-compressed by Messenger/Viber, which weakens EL
 | POST | `/verify` | Multipart: `file`, `order_id`. Returns verdict JSON |
 | POST | `/ledger/sms` | Body: `{"text": "<alert text>", "source": "sms"\|"paste"}`. Parses and stores a transaction |
 | POST | `/ledger/notification` | Body: `{"package", "title", "text"}`. Alert read from an allow-listed wallet app (highest trust) |
-| POST | `/ledger/paste` | Several alerts at once, separated by a blank line |
+| POST | `/ledger/paste` | Several alerts at once, separated by a blank line. `added` counts payments the ledger did not already hold |
+| POST | `/ledger/history-screenshot` | Multipart: `file` - a screenshot of the seller's **own** wallet Transactions screen. Reads it row by row into the ledger with `source="history"` (lowest trust). Returns `added`, `already_in_ledger`, `skipped` (money rows refused, with the reason and the row text) and `unmatched`. 400 when the screen placed no payment, 415 when the upload is not an image, 503 when the server has no OCR |
 | GET | `/ledger` | Lists ledger entries (demo/debug) |
 | GET | `/pending` | Receipts held as PENDING_MATCH, waiting for a late alert |
 | GET | `/history`, `/stats` | Verdict log and per-verdict counts/timings |

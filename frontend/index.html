@@ -68,6 +68,12 @@ Source - that address is what OBS needs, and it already points at this server.</
 <p><small>Alerts normally arrive from your phone (see docs/SMS_FORWARDING.md). If they don't, paste them here: SMS text or lines copied from the wallet's in-app inbox, separated by a blank line.</small></p>
 <textarea id="sms" rows="3" placeholder="You have received PHP 1,250.00 of GCash from JUAN D. Ref. No. 1002 849 130490."></textarea>
 <button id="addSms">Add to ledger</button>
+<p><small>Nothing arriving at all? Upload a screenshot of your <b>own</b> wallet
+Transactions screen and its rows are read into the ledger as <code>history</code> - the
+lowest-trust source, so a large payment still tells you to confirm in the app.</small></p>
+<input type="file" id="histFile" accept="image/*">
+<button id="addHist">Read that screen</button>
+<p id="histOut" hidden></p>
 <table id="ledger"><thead><tr><th>Ref</th><th>Amount</th><th>Sender</th><th>Source</th></tr></thead><tbody></tbody></table>
 
 <script src="api.js"></script>
@@ -262,6 +268,29 @@ $("addSms").onclick = async () => {
   $("sms").value = ""; loadLedger(); loadHistory(); loadOrders(); loadReview();
   const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
   if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.label || h.status.replace("_", " ")}`).join("\n"));
+};
+
+// The fallback when no alert reaches the server: the seller's own wallet Transactions
+// screen, read row by row. `history` is the lowest-trust source - OCR off an image,
+// unsigned - so the result line says so instead of reading like a confirmation.
+$("addHist").onclick = async () => {
+  const f = $("histFile").files[0];
+  if (!f) { alert("Choose a screenshot of your wallet's Transactions screen first."); return; }
+  const form = new FormData();
+  form.append("file", f);
+  const res = await fetch(API + "/ledger/history-screenshot", { method: "POST", headers: hdr(), body: form });
+  const out = $("histOut");
+  out.hidden = false;
+  if (!res.ok) { out.textContent = await problem(res); return; }
+  const r = await res.json();
+  const hits = r.entries.map(e => e.resolved || e.settled).filter(Boolean);
+  out.textContent = `${r.added} new payment(s) from that screen` +
+    (r.already_in_ledger.length ? `, ${r.already_in_ledger.length} the ledger already had` : ``) +
+    (r.skipped.length ? `, ${r.skipped.length} money row(s) refused (${r.skipped.map(s => s.reason).join(", ")})` : ``) +
+    (r.unmatched.length ? `, ${r.unmatched.length} not matched to an order` : ``) +
+    `. Source is "history": the lowest trust, so confirm any large one in the wallet app.` +
+    (hits.length ? ` Settled: ${hits.map(h => `#${h.order_id} ${h.label || h.status.replace("_", " ")}`).join(", ")}.` : ``);
+  $("histFile").value = ""; loadLedger(); loadHistory(); loadOrders(); loadReview();
 };
 // A server with no Tesseract cannot read any receipt, and that is nothing the seller
 // did wrong. Say it at load, before the first upload fails for a reason with no photo

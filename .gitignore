@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 backend/checkiz.db
 backend/checkiz.db-journal
+
+# Real receipts are real names, real numbers and real references. They are measured
+# from a folder outside the repo; these exist only so a well-meaning copy into the
+# working tree cannot be committed by accident. See docs/CALIBRATION.md.
+samples_real/
+samples_edited/
+samples_genuine/

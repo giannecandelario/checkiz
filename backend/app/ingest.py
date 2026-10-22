@@ -34,8 +34,15 @@ def auto_settle(entry: dict):
             "message": msg, "needs_app_check": bool(chk)}
 
 def ingest_alert(entry: dict) -> dict:
-    add_entry(entry)
+    """Store the alert and settle whatever it matches.
+
+    `stored` is whether the ledger gained a row. The first copy of a reference wins
+    (`INSERT OR IGNORE`), so re-sending an alert - or screenshotting a transaction that
+    an SMS already reported - keeps the original row with its original source. Without
+    this, an endpoint that counts answers would count a payment as newly recorded when
+    nothing was recorded, and the seller's income total would be a fiction."""
+    stored = add_entry(entry)
     resolved = resolve_pending(entry["ref"]) if entry.get("has_ref") else None
     settled = None if resolved else auto_settle(entry)
     return {**{k: entry[k] for k in ("ref", "amount", "sender", "source", "has_ref")},
-            "resolved": resolved, "settled": settled}
+            "stored": stored, "resolved": resolved, "settled": settled}
