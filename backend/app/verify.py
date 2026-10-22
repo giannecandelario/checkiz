@@ -2,6 +2,7 @@ import time
 
 from .db import get_conn
 from .config import CONFIRM_ABOVE
+from .fingerprint import find_exact_repeat, image_sha256
 from .labels import FORENSIC, MISMATCH, label_for
 from .ledger import find_entry, set_consumed
 from .qrstore import find_coded_order_by_amount, get_order, mark_paid
@@ -39,7 +40,7 @@ def settle_order(order_id: str, ref: str):
     if get_order(order_id):
         mark_paid(order_id, ref)
 
-def _verify(image_bytes: bytes, order_id: str) -> dict:
+def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
     img = load_image(image_bytes)
     if img is None:
         return result("SUSPECTED_FAKE", "Unreadable image", {}, {}, order_id)
@@ -48,12 +49,21 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     fields = parse_fields(text)
     ref, amount = fields["ref"], fields["amount"]
 
-    # 1. Structure
+    # 1. The very same file was already checked for another order. This runs
+    # before the reference gate on purpose: a re-sent screenshot is a repeat
+    # even when OCR cannot read a single field of it.
+    hit = find_exact_repeat(sha, order_id)
+    if hit:
+        return result("DUPLICATE",
+                      f"This is the same image file already checked for Order #{hit['order_id']}",
+                      fields, {}, order_id)
+
+    # 2. Structure
     if not ref:
         return result("SUSPECTED_FAKE", "Missing or invalid reference number",
                       fields, {}, order_id)
 
-    # 2. Duplicate
+    # 3. Duplicate
     claim = get_claim(ref)
     if claim and str(claim["order_id"]) == str(order_id):  # same buyer re-sending: idempotent
         return result("VERIFIED", f"Order #{order_id} is already settled with Ref {ref}",
@@ -76,7 +86,7 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     boxes = locate_boxes(data, amount, ref)
     forensics = forensic_report(img, boxes)
 
-    # 3. Ledger checks
+    # 4. Ledger checks
     entry = find_entry(ref)
     if entry and entry["consumed_order"] and str(entry["consumed_order"]) != str(order_id):
         return result("DUPLICATE",
@@ -98,7 +108,7 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     if other and other["order_id"] != order_id and issued is None:
         warnings.append(f"This amount was issued in the QR for Order #{other['order_id']}.")
 
-    # 4. Verified (ledger match)
+    # 5. Verified (ledger match)
     if entry:
         chk = app_check_warning(entry)
         if chk:
@@ -112,13 +122,13 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
                       trust=entry["source"], needs_app_check=bool(chk))
     warning = " ".join(warnings) or None
 
-    # 5. Forensic flag with no ledger confirmation
+    # 6. Forensic flag with no ledger confirmation
     if forensics["flagged"]:
         return result("SUSPECTED_FAKE",
                       "Image shows signs of editing on the amount or reference fields",
                       fields, forensics, order_id, reason=FORENSIC)
 
-    # 6. Pending: remember it so a late SMS can resolve it automatically
+    # 7. Pending: remember it so a late SMS can resolve it automatically
     with get_conn() as conn:
         conn.execute("INSERT OR REPLACE INTO pending (ref, order_id, amount) VALUES (?, ?, ?)",
                      (ref, order_id, amount))
@@ -131,21 +141,23 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
     """Run the verdict engine and record the outcome for the dashboard/overlay.
     Receipt images are never stored, only the extracted fields and the verdict."""
     t0 = time.perf_counter()
-    res = _verify(image_bytes, order_id)
+    sha = image_sha256(image_bytes)
+    res = _verify(image_bytes, order_id, sha)
     res["elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
+    res["sha256"] = sha
     f = res.get("fields") or {}
     log_verdict(order_id, res["status"], res["message"], f.get("amount"), f.get("ref"),
-                res["elapsed_ms"], res.get("needs_app_check"), res["label"])
+                res["elapsed_ms"], res.get("needs_app_check"), res["label"], sha)
     return res
 
 def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False,
-                label=None):
+                label=None, sha256=None):
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms, "
-            "needs_app_check, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "needs_app_check, label, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check)),
-             label or label_for(status)),
+             label or label_for(status), sha256),
         )
 
 def get_stats():

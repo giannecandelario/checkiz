@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS verifications (
     elapsed_ms INTEGER,
     needs_app_check INTEGER DEFAULT 0,
     label TEXT,
+    sha256 TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS review_ack (
@@ -69,6 +70,7 @@ def init_db():
             ("verifications", "elapsed_ms", "INTEGER"),
             ("verifications", "needs_app_check", "INTEGER DEFAULT 0"),
             ("verifications", "label", "TEXT"),
+            ("verifications", "sha256", "TEXT"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
             ("qr_orders", "status", "TEXT DEFAULT 'OPEN'"),
@@ -78,3 +80,5 @@ def init_db():
             cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
             if col not in cols:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        # after the columns exist, so an old database does not fail here
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_verifications_sha ON verifications (sha256)")

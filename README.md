@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 62 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 69 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -39,7 +39,7 @@ Sources (link status checked 2026-10-23):
 | Verdict | Meaning | How reliable |
 |---|---|---|
 | **Verified** | The receipt's reference and amount match a payment alert on the seller's own ledger | Strongest signal. Only as trustworthy as the alert feed |
-| **Reused** | This reference (or this image) was already accepted for another order | Reliable for repeats of a reference number |
+| **Reused** | This reference number, or this exact image file, was already checked for another order | Reliable for repeats of a reference number or of the identical file. A copy re-compressed by a messenger app has different bytes and is caught only by the reference |
 | **Doesn't match** | The amount differs from the alert, or from the amount issued for this order | Reliable when a ledger entry exists |
 | **Likely edited** | Image signals suggest tampering | **Weak. See below** |
 | **Can't confirm yet** | Nothing contradicts the receipt and nothing confirms it either: no matching payment has arrived, or the image could not be read | Honest default. Wait for the alert, check the wallet app, or retake the photo |
@@ -72,7 +72,7 @@ Limits: it only covers orders made through Checkiz's QR page. The wallet may ign
 ## How it works
 
 1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, or (c) pasted text. Each entry records its source, and sources have different trust (see below).
-2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts reference, amount and time. Reference format and replay are checked, then the ledger.
+2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number and the amount (there is no time field yet). The file's hash is compared with earlier checks, then reference format and replay, then the ledger.
 3. **Settlement:** a ledger match (or an alert that matches an open coded order) settles the order. The order is locked to that payment.
 4. **Review queue:** anything unresolved, suspicious, duplicate, or needing an in-app confirmation is listed for the seller. Receipt images are not stored, only extracted fields and the verdict.
 
@@ -103,7 +103,9 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), untested - needs a real phone |
 | Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
 | Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
-| Image fingerprint for reuse; consistency checks | Planned |
+| Reuse by identical file (SHA-256 of the upload, image never stored) | Built, tested ([`backend/app/fingerprint.py`](backend/app/fingerprint.py)) |
+| Reuse by perceptual image hash | **Not built.** Measured on template-identical receipts and rejected: a different payment hashes closer than a re-saved copy. Numbers in [`docs/STATUS.md`](docs/STATUS.md) |
+| Consistency checks that need no alert (format, amount range, time plausibility, layout) | Planned - note there is no time field extracted yet |
 | Optional AI-assisted reading (extraction only, off by default, gated by evaluation) | Planned |
 | Real-device test, calibration on genuine receipts, seller interviews | Not done |
 
@@ -123,7 +125,7 @@ Checkiz is a low-friction first check. It is not better overall than the options
 
 ## Optional AI-assisted reading (planned, off by default)
 
-Phone photos of screens are where plain OCR is weakest. An optional vision model may read reference, amount and time more accurately. It is **extraction only**: it never decides whether a receipt is real. If it disagrees with standard OCR, the result is "Can't confirm yet". It requires explicit consent, is off by default, and falls back automatically to standard OCR when unavailable. It will be enabled as an option only if a measured comparison on real and edited receipts (including phone photos) shows an improvement; the README will report that result with the number of receipts, including if it shows none. Provider and data terms read before this was written: [`docs/AI_PRIVACY.md`](docs/AI_PRIVACY.md).
+Phone photos of screens are where plain OCR is weakest. An optional vision model may read the reference, amount and time more accurately - plain OCR today returns only the reference and the amount, so extracting the time is part of what the model would have to prove. It is **extraction only**: it never decides whether a receipt is real. If it disagrees with standard OCR, the result is "Can't confirm yet". It requires explicit consent, is off by default, and falls back automatically to standard OCR when unavailable. It will be enabled as an option only if a measured comparison on real and edited receipts (including phone photos) shows an improvement; the README will report that result with the number of receipts, including if it shows none. Provider and data terms read before this was written: [`docs/AI_PRIVACY.md`](docs/AI_PRIVACY.md).
 
 ## Privacy and responsible use
 
@@ -187,7 +189,8 @@ Core (the one user, the one job):
 - [x] Verdict labels in the API matching the table above (`label` field, dashboard and overlay)
 - [ ] Buyer pay page so the exact amount is easy to pay
 - [ ] `backend/demo.py` scripted demo on a throwaway database
-- [ ] Image fingerprint for reuse detection
+- [x] Reuse detection by identical file (hash of the upload; the image is not stored)
+- [ ] ~~Image perceptual hash for reuse~~ measured and rejected - it cannot tell two different receipts apart. Details in `docs/STATUS.md`
 - [ ] Consistency checks that do not need alerts (reference format, amount format, time plausibility, layout)
 - [ ] **Real-device alert test** (`docs/DEVICE_TEST.md`) and fallback: OCR of the seller's own Transactions screen into the ledger
 - [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates

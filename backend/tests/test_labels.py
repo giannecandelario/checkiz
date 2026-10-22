@@ -35,6 +35,15 @@ def stub_ocr(monkeypatch, text, flagged=False):
                                             "flagged": flagged})
 
 
+def other_png(n):
+    """A distinct file each time: the byte-identity reuse check would otherwise
+    answer before the verdict being tested ever runs."""
+    img = np.full((80, 200, 3), 255, np.uint8)
+    img[:, :4 * (n + 1)] = 0
+    ok, enc = cv2.imencode(".png", img)
+    return enc.tobytes()
+
+
 def test_label_mapping_is_the_five_seller_words():
     assert label_for("VERIFIED") == "Verified"
     assert label_for("DUPLICATE") == "Reused"
@@ -89,11 +98,11 @@ def test_ledger_match_outranks_the_forensic_flag(monkeypatch, png):
     assert r["status"] == "VERIFIED" and r["label"] == "Verified"
 
 
-def test_unconfirmed_cases_are_labelled_cant_confirm_yet(monkeypatch, png):
+def test_unconfirmed_cases_are_labelled_cant_confirm_yet(monkeypatch):
     stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}")
-    assert verify.verify_receipt(png, "408")["label"] == "Can't confirm yet"
+    assert verify.verify_receipt(other_png(1), "408")["label"] == "Can't confirm yet"
     stub_ocr(monkeypatch, "PHP 500.00 no reference here")
-    assert verify.verify_receipt(png, "409")["label"] == "Can't confirm yet"
+    assert verify.verify_receipt(other_png(2), "409")["label"] == "Can't confirm yet"
     assert verify.verify_receipt(b"not an image", "410")["label"] == "Can't confirm yet"
 
 
@@ -178,13 +187,13 @@ def test_evidence_timeline_carries_the_label(monkeypatch, png):
     assert ev["latest"]["label"] == "Can't confirm yet"
 
 
-def test_stats_count_by_label_as_well_as_by_status(monkeypatch, png):
+def test_stats_count_by_label_as_well_as_by_status(monkeypatch):
     add_entry({"ref": REF, "amount": 1250.0, "sender": None, "raw": "t"})
     stub_ocr(monkeypatch, f"PHP 9,250.00 Ref No. {REF}")
-    verify.verify_receipt(png, "420")
+    verify.verify_receipt(other_png(3), "420")
     other = "1002849130491"  # no ledger entry, so the flag has nothing to override it
     stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {other}", flagged=True)
-    verify.verify_receipt(png, "421")
+    verify.verify_receipt(other_png(4), "421")
     s = verify.get_stats()
     assert s["by_status"]["SUSPECTED_FAKE"] == 2
     assert s["by_label"] == {"Doesn't match": 1, "Likely edited": 1}

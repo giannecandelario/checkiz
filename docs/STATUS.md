@@ -1,6 +1,6 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23 against `feat/product-hardening`. Suite: **62 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23 against `feat/product-hardening`. Suite: **69 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
@@ -25,7 +25,8 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **62 tests passing**
 | Buyer pay page (`/pay/{order_id}`, `qr.png`, `pay.html`) | **No** | - | Brief Step 0 lists it; README claimed it Built |
 | Scripted demo (`backend/demo.py`) | **No** | - | README's "Getting started" references a file that does not exist |
 | `docs/DEVICE_TEST.md` | **No** | - | Referenced twice in the README |
-| Image perceptual hash | **No** | - | Brief task 2 |
+| Exact-file reuse check (SHA-256 of the upload) | Yes | `backend/app/fingerprint.py`, `verifications.sha256` + index, runs before the reference gate in `verify.py` | `test_fingerprint.py` (7), incl. the limits pinned below |
+| Image perceptual hash (dHash) | **No - measured and rejected** | - | See "Perceptual hash: the measurement" below |
 | Alert-free consistency checks | **No** | - | Brief task 3 |
 | AI-assisted reader, `eval/run_eval.py`, `docs/AI_EVAL.md` | **No** | - | Brief task 7, gated and last priority |
 | Staff mode, PINs, `/reconcile/daily` | **No** | - | Explicitly Deferred in the brief |
@@ -42,6 +43,44 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **62 tests passing**
 - The label wording was checked by rendering `index.html` and `overlay.html` against a throwaway database holding one verdict per label (2026-10-23, local servers, seeded rows rather than real OCR - Tesseract is not installed on this machine). That is a manual look, not a test: the UI still has no automated coverage.
 - Two UI strings still named GCash/Maya as if the tool were limited to them (the dashboard subtitle and the QR registration hint). Reworded; the alert-text placeholder keeps its GCash example because it is an example.
 
+## Perceptual hash: the measurement that killed it
+
+Brief task 2 asked for a dHash so a repeat could be caught even when OCR misreads
+the reference. Measured on 2026-10-23 with the synthetic receipts in `samples/`
+(same template, differing only in digits, which is what real receipts look like),
+16x16 grid = 256 bits:
+
+| Variant | Distance |
+|---|---|
+| same file, re-encoded JPEG q80 | 5 (2.0%) |
+| same file, scaled to 75% | 1 (0.4%) |
+| same file, 1% border crop | 12 (4.7%) |
+| same file, 1px blur | 2 (0.8%) |
+| **different** receipt, one reference digit changed | 0 (0.0%) |
+| **different** receipt, several reference digits changed | 1 (0.4%) |
+| same receipt photographed at an angle / with glare | 39-57 (15-22%) |
+
+There is no usable threshold: a different payment of the same amount is *closer*
+to another receipt than a re-saved copy is to its own original. Repeating the test
+at 32x32 and 64x64 kept the overlap (at 64x64: re-encode 17 bits vs different
+reference 6-21 bits, out of 4096). And the case that matters most in the field - a
+phone photo of a screen - is 15-22% apart, so it would not be caught anyway.
+
+Shipping it would label genuine payments "Reused". So it is not built. What is
+built is the one comparison with no false positives: the identical file, byte for
+byte, arriving again for another order (`SHA-256`), which still works when OCR
+reads nothing. Its limit is re-encoded copies, and `test_fingerprint.py` pins that
+behaviour instead of hiding it.
+
+## Re-running the sample generator changes the samples
+
+`make_samples.py` writes pixels that depend on the fonts installed (it tries
+DejaVuSans, then Arial, then Pillow's default bitmap font). Regenerating
+`samples/real.png` and `samples/edited.png` on this machine changed 8.4% and 7.8%
+of the pixels, which is enough to move the ELA and sharpness numbers in the README
+table. The committed files are what those numbers were measured on; if someone
+regenerates them, the measured table has to be re-run and re-stated.
+
 ## What no test covers
 
-The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour, and anything requiring a wallet's actual alert wording. The 62 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour, and anything requiring a wallet's actual alert wording. The 69 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.

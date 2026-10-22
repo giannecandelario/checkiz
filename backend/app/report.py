@@ -47,7 +47,7 @@ def evidence(order_id: str) -> dict:
         order = conn.execute("SELECT * FROM qr_orders WHERE order_id = ?", (order_id,)).fetchone()
         verdicts = [dict(r) for r in conn.execute(
             """SELECT id, status, label, message, amount, ref, needs_app_check, elapsed_ms,
-                      created_at
+                      sha256, created_at
                FROM verifications WHERE order_id = ? ORDER BY id""", (order_id,))]
         for v in verdicts:
             v["label"] = v["label"] or label_for(v["status"])
@@ -64,7 +64,7 @@ def evidence(order_id: str) -> dict:
 
     events = ([{"at": v["created_at"], "kind": "verdict", "status": v["status"],
                 "label": v["label"], "detail": v["message"], "ref": v["ref"],
-                "amount": v["amount"],
+                "amount": v["amount"], "sha256": v["sha256"],
                 "needs_app_check": bool(v["needs_app_check"])} for v in verdicts]
               + [{"at": p["received_at"], "kind": "payment_alert", "status": "RECEIVED",
                   "detail": f"{p['amount']:.2f} seen by {p['source'] or 'unknown'}"
