@@ -29,7 +29,7 @@
 </head>
 <body>
 <h1>Checkiz</h1>
-<p>Fake-receipt check for GCash/Maya payments. <a href="qr.html">QR Ph tools</a></p>
+<p>Receipt check for e-wallet transfers - verified against your own payment alerts. <a href="qr.html">QR Ph tools</a></p>
 <input type="text" id="order" placeholder="Order ID" value="101">
 <div id="drop">Drop receipt screenshot here or click to choose</div>
 <input id="file" type="file" accept="image/*" hidden>
@@ -107,7 +107,7 @@ async function send(file) {
     const res = await fetch(API + "/verify", { method: "POST", body: form });
     const r = await res.json();
     banner.className = r.status;
-    banner.innerHTML = `<strong>${esc(r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
+    banner.innerHTML = `<strong>${esc(r.label || r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
       (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
       `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
     loadLedger(); loadHistory(); loadOrders(); loadReview();
@@ -141,7 +141,7 @@ async function loadReview() {
   try { rows = await get("/review"); } catch (e) { apiDown(e); return; }
   $("reviewCount").textContent = rows.length ? `(${rows.length})` : "- nothing";
   $("review").querySelector("tbody").innerHTML = rows.map(r =>
-    `<tr><td>#${esc(r.order_id)}</td><td><span class="badge ${esc(r.reason)}">${esc(LABEL[r.reason] || r.reason)}</span></td>` +
+    `<tr><td>#${esc(r.order_id)}</td><td><span class="badge ${esc(r.reason)}">${esc(r.label || LABEL[r.reason] || r.reason)}</span></td>` +
     `<td>${esc(r.detail)}${r.amount == null ? "" : ` <small>(${Number(r.amount).toFixed(2)})</small>`}</td>` +
     `<td><button type="button" class="why" data-o="${esc(r.order_id)}">why</button> ` +
     `<button type="button" class="ok" data-o="${esc(r.order_id)}">reviewed</button></td></tr>`).join("")
@@ -164,7 +164,7 @@ async function showEvidence(order) {
     const ev = await get(`/orders/${encodeURIComponent(order)}/evidence`);
     const steps = ev.timeline.map(t =>
       `<li><small>${esc(t.at)} UTC</small> ` +
-      (t.kind === "verdict" ? `<span class="badge ${esc(t.status)}">${esc(t.status.replace("_", " "))}</span>`
+      (t.kind === "verdict" ? `<span class="badge ${esc(t.status)}">${esc(t.label || t.status.replace("_", " "))}</span>`
                             : `<em>${esc(t.kind)}</em>`) + ` ${esc(t.detail)}</li>`).join("");
     box.hidden = false;
     box.innerHTML = `<strong>Order #${esc(order)}</strong> <small>` +
@@ -188,9 +188,10 @@ $("packing").onclick = async () => {
 async function loadStats() {
   try {
     const t = await get("/stats");
-    const b = t.by_status || {};
-    $("stats").firstChild.textContent = `Total ${t.total} | Verified ${b.VERIFIED || 0} | Pending ${b.PENDING_MATCH || 0} | ` +
-      `Suspected fake ${b.SUSPECTED_FAKE || 0} | Duplicate ${b.DUPLICATE || 0} | Avg ${t.avg_elapsed_ms ?? "-"} ms`;
+    const l = t.by_label || {};
+    const words = ["Verified", "Reused", "Doesn't match", "Likely edited", "Can't confirm yet"];
+    $("stats").firstChild.textContent = `Total ${t.total} | ` +
+      words.map(w => `${w} ${l[w] || 0}`).join(" | ") + ` | Avg ${t.avg_elapsed_ms ?? "-"} ms`;
   } catch (e) { apiDown(e); }
 }
 
@@ -199,7 +200,7 @@ async function loadHistory() {
   try {
     const rows = await get("/history");
     $("history").querySelector("tbody").innerHTML = rows.map(r =>
-      `<tr><td>#${esc(r.order_id)}</td><td>${esc(r.status.replace("_", " "))}</td><td>${esc(r.ref)}</td><td>${r.amount == null ? "-" : Number(r.amount).toFixed(2)}</td></tr>`).join("");
+      `<tr><td>#${esc(r.order_id)}</td><td>${esc(r.label || r.status.replace("_", " "))}</td><td>${esc(r.ref)}</td><td>${r.amount == null ? "-" : Number(r.amount).toFixed(2)}</td></tr>`).join("");
   } catch (e) { apiDown(e); }
 }
 
@@ -210,7 +211,7 @@ $("addSms").onclick = async () => {
   const out = await res.json();
   $("sms").value = ""; loadLedger(); loadHistory(); loadOrders(); loadReview();
   const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
-  if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.status.replace("_", " ")}`).join("\n"));
+  if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.label || h.status.replace("_", " ")}`).join("\n"));
 };
 loadLedger(); loadHistory(); loadOrders(); loadReview();
 setInterval(() => { loadOrders(); loadHistory(); loadLedger(); loadReview(); }, 5000);

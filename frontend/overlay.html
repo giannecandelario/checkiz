@@ -32,7 +32,7 @@ async function poll() {
       lastId = r.id;
       const card = document.getElementById("card");
       card.className = r.status; card.style.display = "block";
-      card.innerHTML = `Order #${esc(r.order_id)}: <strong>${esc(r.status.replace("_", " "))}</strong>` +
+      card.innerHTML = `Order #${esc(r.order_id)}: <strong>${esc(r.label || r.status.replace("_", " "))}</strong>` +
         `<small>${esc(r.message)}</small>`;
     }
   } catch (e) {}
@@ -44,7 +44,7 @@ async function showQueue() {
     const rows = await (await fetch(API + "/review", { headers: KEY ? { "X-API-Key": KEY } : {} })).json();
     document.getElementById("queue").innerHTML = rows.length
       ? `Needs review: <b>${rows.length}</b> (last: #${esc(rows[0].order_id)} ` +
-        `${esc(LABEL[rows[0].reason] || rows[0].reason)})`
+        `${esc(rows[0].label || LABEL[rows[0].reason] || rows[0].reason)})`
       : "Needs review: 0";
   } catch (e) {}
 }

@@ -5,6 +5,7 @@
 3. Otherwise, if exactly one open centavo-coded order was issued for this amount,
    settle that order straight from the alert. No screenshot needed."""
 from .db import get_conn
+from .labels import label_for
 from .ledger import add_entry, find_entry, set_consumed
 from .qrstore import find_open_coded_order, mark_paid
 from .verify import add_claim, app_check_warning, get_claim, log_verdict, resolve_pending
@@ -29,7 +30,8 @@ def auto_settle(entry: dict):
         msg += f". {chk}"
     log_verdict(oid, "VERIFIED", msg, row["amount"], entry["ref"] if entry.get("has_ref") else None,
                 needs_app_check=bool(chk))
-    return {"order_id": oid, "status": "VERIFIED", "message": msg, "needs_app_check": bool(chk)}
+    return {"order_id": oid, "status": "VERIFIED", "label": label_for("VERIFIED"),
+            "message": msg, "needs_app_check": bool(chk)}
 
 def ingest_alert(entry: dict) -> dict:
     add_entry(entry)

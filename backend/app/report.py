@@ -7,6 +7,7 @@ import io
 
 from .config import CONFIRM_ABOVE
 from .db import get_conn
+from .labels import label_for
 
 # Alert text can carry the buyer's phone number, and a dispute record only needs
 # to prove a payment existed and where the alert came from, so `raw` is left out.
@@ -45,8 +46,11 @@ def evidence(order_id: str) -> dict:
     with get_conn() as conn:
         order = conn.execute("SELECT * FROM qr_orders WHERE order_id = ?", (order_id,)).fetchone()
         verdicts = [dict(r) for r in conn.execute(
-            """SELECT id, status, message, amount, ref, needs_app_check, elapsed_ms, created_at
+            """SELECT id, status, label, message, amount, ref, needs_app_check, elapsed_ms,
+                      created_at
                FROM verifications WHERE order_id = ? ORDER BY id""", (order_id,))]
+        for v in verdicts:
+            v["label"] = v["label"] or label_for(v["status"])
         claims = [dict(r) for r in conn.execute(
             "SELECT ref, order_id, claimed_at FROM claims WHERE order_id = ?", (order_id,))]
         ack = conn.execute("SELECT acked_at FROM review_ack WHERE order_id = ?", (order_id,)).fetchone()
@@ -59,7 +63,8 @@ def evidence(order_id: str) -> dict:
             tuple(refs))] if refs else []
 
     events = ([{"at": v["created_at"], "kind": "verdict", "status": v["status"],
-                "detail": v["message"], "ref": v["ref"], "amount": v["amount"],
+                "label": v["label"], "detail": v["message"], "ref": v["ref"],
+                "amount": v["amount"],
                 "needs_app_check": bool(v["needs_app_check"])} for v in verdicts]
               + [{"at": p["received_at"], "kind": "payment_alert", "status": "RECEIVED",
                   "detail": f"{p['amount']:.2f} seen by {p['source'] or 'unknown'}"

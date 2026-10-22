@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 43 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 62 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -42,9 +42,9 @@ Sources (link status checked 2026-10-23):
 | **Reused** | This reference (or this image) was already accepted for another order | Reliable for repeats of a reference number |
 | **Doesn't match** | The amount differs from the alert, or from the amount issued for this order | Reliable when a ledger entry exists |
 | **Likely edited** | Image signals suggest tampering | **Weak. See below** |
-| **Can't confirm yet** | Looks well formed but no matching payment has arrived | Wait for the alert or check the wallet app |
+| **Can't confirm yet** | Nothing contradicts the receipt and nothing confirms it either: no matching payment has arrived, or the image could not be read | Honest default. Wait for the alert, check the wallet app, or retake the photo |
 
-The API currently returns status codes (`VERIFIED`, `DUPLICATE`, `SUSPECTED_FAKE`, `PENDING_MATCH`). **These plain-language labels are not in the responses yet** - adding a `label` field is task 1 in [`AGENT_BRIEF.md`](AGENT_BRIEF.md), and the dashboard still shows the codes.
+The API returns both a machine status (`VERIFIED`, `DUPLICATE`, `SUSPECTED_FAKE`, `PENDING_MATCH`) and the plain `label` above. The codes did not change; the label is derived from the code plus which check produced it, because `SUSPECTED_FAKE` covers three different things a seller should do next. A receipt that cannot be read is labelled "Can't confirm yet", not "Likely edited" - nothing was contradicted. The dashboard, overlay, review queue and evidence view show the labels. Mapping: [`backend/app/labels.py`](backend/app/labels.py), tests in `backend/tests/test_labels.py`.
 
 **What Checkiz cannot do:** prove a receipt is fake from the image alone. A clean, AI-generated receipt can look perfect. Image analysis is a secondary signal. **Confirm large payments in the wallet app.**
 
@@ -102,7 +102,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Dashboard, order board, OBS overlay | Built (basic), no automated tests |
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), untested - needs a real phone |
 | Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
-| Plain-language verdict labels in the API | **Planned, not built** |
+| Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
 | Image fingerprint for reuse; consistency checks | Planned |
 | Optional AI-assisted reading (extraction only, off by default, gated by evaluation) | Planned |
 | Real-device test, calibration on genuine receipts, seller interviews | Not done |
@@ -184,7 +184,7 @@ Core (the one user, the one job):
 - [x] Order-bound QR Ph and alert-driven auto-settlement
 - [x] Alert feed with trust levels, review queue, evidence view, packing CSV
 - [x] Camera capture on the main page (`frontend/camera.js`; the "retake for a clearer photo" hint still needs an OCR confidence signal)
-- [ ] Verdict labels in the API matching the table above
+- [x] Verdict labels in the API matching the table above (`label` field, dashboard and overlay)
 - [ ] Buyer pay page so the exact amount is easy to pay
 - [ ] `backend/demo.py` scripted demo on a throwaway database
 - [ ] Image fingerprint for reuse detection

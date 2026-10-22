@@ -6,6 +6,7 @@ verdict log (which covers any order ID a receipt mentioned) and the order board
 (which knows about QRs that were issued but never paid)."""
 from .config import ORDER_TTL_HOURS
 from .db import get_conn
+from .labels import label_for
 
 # A latest verdict of these still needs a person. VERIFIED only appears when the
 # payment was confirmed by a source a texter could spoof.
@@ -15,8 +16,8 @@ _TTL = f"-{int(ORDER_TTL_HOURS * 60)} minutes"
 def review_list():
     with get_conn() as conn:
         verdicts = [dict(r) for r in conn.execute(
-            f"""SELECT v.id, v.order_id, v.status, v.message, v.amount, v.ref, v.created_at,
-                       v.needs_app_check
+            f"""SELECT v.id, v.order_id, v.status, v.label, v.message, v.amount, v.ref,
+                       v.created_at, v.needs_app_check
                 FROM verifications v
                 WHERE (v.status IN {_UNRESOLVED} OR v.needs_app_check = 1)
                   AND v.id = (SELECT MAX(id) FROM verifications WHERE order_id = v.order_id)
@@ -32,7 +33,10 @@ def review_list():
     out = {}
     for v in verdicts:
         reason = v["status"] if v["status"] in _UNRESOLVED else "CONFIRM_IN_APP"
-        out[str(v["order_id"])] = {"order_id": v["order_id"], "reason": reason,
+        # The seller already saw this wording when the receipt was checked. A
+        # VERIFIED row is here only for the in-app confirmation, so it gets no label.
+        label = (v["label"] or label_for(v["status"])) if reason in _UNRESOLVED else None
+        out[str(v["order_id"])] = {"order_id": v["order_id"], "reason": reason, "label": label,
                                    "detail": v["message"], "amount": v["amount"],
                                    "ref": v["ref"], "seen_at": v["created_at"]}
     for o in unpaid:

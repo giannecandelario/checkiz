@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS verifications (
     ref TEXT,
     elapsed_ms INTEGER,
     needs_app_check INTEGER DEFAULT 0,
+    label TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS review_ack (
@@ -67,6 +68,7 @@ def init_db():
         for table, col, ddl in [
             ("verifications", "elapsed_ms", "INTEGER"),
             ("verifications", "needs_app_check", "INTEGER DEFAULT 0"),
+            ("verifications", "label", "TEXT"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
             ("qr_orders", "status", "TEXT DEFAULT 'OPEN'"),

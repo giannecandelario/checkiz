@@ -2,6 +2,7 @@ import time
 
 from .db import get_conn
 from .config import CONFIRM_ABOVE
+from .labels import FORENSIC, MISMATCH, label_for
 from .ledger import find_entry, set_consumed
 from .qrstore import find_coded_order_by_amount, get_order, mark_paid
 from .parser import load_image, run_ocr, parse_fields, locate_boxes
@@ -15,9 +16,9 @@ def add_claim(ref: str, order_id: str):
     with get_conn() as conn:
         conn.execute("INSERT INTO claims (ref, order_id) VALUES (?, ?)", (ref, order_id))
 
-def result(status, message, fields, forensics, order_id, warning=None, **extra):
-    out = {"status": status, "message": message, "fields": fields,
-           "forensics": forensics, "order_id": order_id, **extra}
+def result(status, message, fields, forensics, order_id, warning=None, reason=None, **extra):
+    out = {"status": status, "label": label_for(status, reason), "message": message,
+           "fields": fields, "forensics": forensics, "order_id": order_id, **extra}
     if warning:
         out["warning"] = warning
     return out
@@ -69,7 +70,7 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     if issued is not None and amount is not None and abs(amount - issued) > 0.01:
         return result("SUSPECTED_FAKE",
                       f"Receipt shows {amount:.2f} but Order #{order_id} was issued for {issued:.2f}",
-                      fields, {}, order_id)
+                      fields, {}, order_id, reason=MISMATCH)
 
     # Forensics
     boxes = locate_boxes(data, amount, ref)
@@ -84,7 +85,7 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     if entry and amount is not None and abs(entry["amount"] - amount) > 0.01:
         return result("SUSPECTED_FAKE",
                       f"Amount mismatch: receipt {amount:.2f}, ledger {entry['amount']:.2f}",
-                      fields, forensics, order_id)
+                      fields, forensics, order_id, reason=MISMATCH)
 
     # Policy: a ledger match (ref + amount) is the strongest signal, so it is
     # never overridden by the probabilistic image check. The flag is returned
@@ -115,7 +116,7 @@ def _verify(image_bytes: bytes, order_id: str) -> dict:
     if forensics["flagged"]:
         return result("SUSPECTED_FAKE",
                       "Image shows signs of editing on the amount or reference fields",
-                      fields, forensics, order_id)
+                      fields, forensics, order_id, reason=FORENSIC)
 
     # 6. Pending: remember it so a late SMS can resolve it automatically
     with get_conn() as conn:
@@ -134,25 +135,32 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
     res["elapsed_ms"] = int((time.perf_counter() - t0) * 1000)
     f = res.get("fields") or {}
     log_verdict(order_id, res["status"], res["message"], f.get("amount"), f.get("ref"),
-                res["elapsed_ms"], res.get("needs_app_check"))
+                res["elapsed_ms"], res.get("needs_app_check"), res["label"])
     return res
 
-def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False):
+def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False,
+                label=None):
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms, "
-            "needs_app_check) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check))),
+            "needs_app_check, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check)),
+             label or label_for(status)),
         )
 
 def get_stats():
     """Counts per verdict plus timing, for the dashboard and the demo's success metrics."""
     with get_conn() as conn:
-        counts = {r["status"]: r["n"] for r in conn.execute(
-            "SELECT status, COUNT(*) AS n FROM verifications GROUP BY status")}
+        rows = conn.execute("SELECT status, label, COUNT(*) AS n FROM verifications "
+                            "GROUP BY status, label").fetchall()
         t = conn.execute("SELECT AVG(elapsed_ms) AS avg, MAX(elapsed_ms) AS max "
                          "FROM verifications WHERE elapsed_ms IS NOT NULL").fetchone()
-    return {"total": sum(counts.values()), "by_status": counts,
+    counts, labels = {}, {}
+    for r in rows:
+        counts[r["status"]] = counts.get(r["status"], 0) + r["n"]
+        word = r["label"] or label_for(r["status"])
+        labels[word] = labels.get(word, 0) + r["n"]
+    return {"total": sum(counts.values()), "by_status": counts, "by_label": labels,
             "avg_elapsed_ms": round(t["avg"]) if t["avg"] is not None else None,
             "max_elapsed_ms": t["max"]}
 
@@ -170,8 +178,10 @@ def resolve_pending(ref: str):
         conn.execute("DELETE FROM pending WHERE ref = ?", (ref,))
     entry = find_entry(ref)
     chk = None
+    reason = None
     if p["amount"] is not None and abs(entry["amount"] - p["amount"]) > 0.01:
         status = "SUSPECTED_FAKE"
+        reason = MISMATCH
         msg = f"Amount mismatch: receipt {p['amount']:.2f}, ledger {entry['amount']:.2f}"
     elif get_claim(ref):
         status, msg = "DUPLICATE", f"Ref {ref} was already claimed"
@@ -183,8 +193,9 @@ def resolve_pending(ref: str):
         if chk:
             msg += f". {chk}"
     app_check = bool(chk)
-    log_verdict(p["order_id"], status, msg, p["amount"], ref, needs_app_check=app_check)
-    return {"order_id": p["order_id"], "status": status, "message": msg,
+    label = label_for(status, reason)
+    log_verdict(p["order_id"], status, msg, p["amount"], ref, needs_app_check=app_check, label=label)
+    return {"order_id": p["order_id"], "status": status, "label": label, "message": msg,
             "needs_app_check": app_check}
 
 def list_history(limit: int = 20):
@@ -192,4 +203,10 @@ def list_history(limit: int = 20):
         rows = conn.execute(
             "SELECT * FROM verifications ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            row = dict(r)
+            # rows written before the label existed are labelled from their status
+            row["label"] = row.get("label") or label_for(row["status"])
+            out.append(row)
+        return out
