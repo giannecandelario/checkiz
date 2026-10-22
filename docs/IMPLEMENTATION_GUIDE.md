@@ -1,6 +1,6 @@
 # Checkiz Implementation Guide
 
-Step-by-step build of the MVP described in `BLUEPRINT.md`.
+Step-by-step build of the MVP described in `BLUEPRINT.md`. It stops at the MVP: the alert feed, order binding, QR Ph tools and reconciliation reports added later are documented in `README.md` and `BLUEPRINT.md`, not here.
 
 **Assumed stack** (change if you prefer another): Python 3.10+, FastAPI, Tesseract, OpenCV, SQLite, plain HTML/JS frontend.
 

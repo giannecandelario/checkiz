@@ -29,6 +29,7 @@ Any Android app that forwards SMS to a webhook works. Point it at `/ledger/sms` 
 1. It is stored once. Re-sending the same alert is harmless.
 2. If a receipt with the same reference was waiting, that order is settled.
 3. Otherwise, if one open order was issued for exactly that amount, the order is settled from the alert alone (see "Order-bound payments" in the README).
+4. If the alert came from SMS or pasted text rather than the wallet app, and the amount is at or above `CHECKIZ_CONFIRM_ABOVE`, the order is marked `needs_app_check` and appears on the reconciliation review list (`GET /review`) and on the packing list with `confirm_in_app=YES`.
 
 ## Safety
 

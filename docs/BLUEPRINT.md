@@ -98,6 +98,18 @@ The ledger check is the strongest signal. Image forensics supports it but is pro
 | order_id | TEXT | Order that claimed it |
 | claimed_at | TEXT | ISO 8601 |
 
+**pending** - receipts held as PENDING_MATCH so a late alert can settle them: `ref` (primary key), `order_id`, `amount`, `created_at`.
+
+**qr_orders** - orders issued through the QR page: `order_id` (primary key), `amount`, `coded`, `status` (OPEN/PAID), `paid_ref`, `paid_at`, `created_at`.
+
+**verifications** - the verdict log, and the source the review list reads: `id`, `order_id`, `status`, `message`, `amount`, `ref`, `elapsed_ms`, `needs_app_check`, `created_at`.
+
+**review_ack** - `order_id` (primary key), `acked_id`, `acked_at`. `acked_id` is the last verdict row acknowledged, so any newer verdict reopens the order.
+
+**settings** - key/value, holds the registered seller QR payload.
+
+Receipt images are never stored in any table.
+
 ## 7. Verdict Logic
 
 Evaluated in order; the first matching rule wins.
@@ -111,7 +123,9 @@ Evaluated in order; the first matching rule wins.
 | 5 | Reference and amount match ledger | VERIFIED (write to `claims`) |
 | 6 | Otherwise | PENDING_MATCH |
 
-Rule 4 runs after the ledger amount check so that a ledger match is never overridden silently by a noisy image heuristic: if forensics flags an image that also matches the ledger, the response should include the flag as a warning. Decide which policy you want and keep it consistent.
+Rule 4 runs after the ledger amount check so that a ledger match is never overridden silently by a noisy image heuristic. The implemented policy: when the reference and amount match the ledger, `VERIFIED` wins and the forensic flag is returned as a `warning` on the response instead of changing the verdict. A forensic flag with no ledger confirmation is `SUSPECTED_FAKE` (rule 5).
+
+A `VERIFIED` verdict whose only evidence is a spoofable alert source (SMS or pasted text) at or above `CHECKIZ_CONFIRM_ABOVE` also carries `needs_app_check`, which is persisted on the verdict row so the reconciliation review list can surface it later.
 
 ## 8. Forensic Checks
 
@@ -128,9 +142,21 @@ Known limits: screenshots are re-compressed by Messenger/Viber, which weakens EL
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/verify` | Multipart: `file`, `order_id`. Returns verdict JSON |
-| POST | `/ledger/sms` | Body: `{"text": "<sms text>"}`. Parses and stores a transaction |
+| POST | `/ledger/sms` | Body: `{"text": "<alert text>", "source": "sms"\|"paste"}`. Parses and stores a transaction |
+| POST | `/ledger/notification` | Body: `{"package", "title", "text"}`. Alert read from an allow-listed wallet app (highest trust) |
+| POST | `/ledger/paste` | Several alerts at once, separated by a blank line |
 | GET | `/ledger` | Lists ledger entries (demo/debug) |
+| GET | `/pending` | Receipts held as PENDING_MATCH, waiting for a late alert |
+| GET | `/history`, `/stats` | Verdict log and per-verdict counts/timings |
+| GET | `/review` | The reconciliation list: orders Checkiz could not settle |
+| POST | `/review/{order_id}` | Acknowledge an order; a newer verdict reopens it |
+| GET | `/orders` | Live order board (OPEN / PAID) |
+| GET | `/orders/packing.csv` | Paid orders as a CSV checklist, with `confirm_in_app` |
+| GET | `/orders/{order_id}/evidence` | Timestamped record for one order |
+| POST | `/qr/decode`, `/qr/register`, `/qr/generate` | Register the seller's QR Ph, build a one-order QR |
 | GET | `/health` | Liveness check |
+
+Every endpoint except `/health` and `/verify` is locked when `CHECKIZ_API_KEY` is set.
 
 `/verify` response:
 

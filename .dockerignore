@@ -1,0 +1,11 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/checkiz.db
+.dockerignore
+Dockerfile
+README.md
+docs/
+samples/
