@@ -1,12 +1,12 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23 against `feat/product-hardening`. Suite: **69 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23 against `feat/product-hardening`. Suite: **119 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
 | Feature | Exists | Where | Test coverage |
 |---|---|---|---|
-| Receipt upload, OCR, field extraction | Yes | `backend/app/parser.py` (`run_ocr`, `parse_fields`, `locate_boxes`) | `test_verify.py` (3 parse tests, stubbed OCR); real Tesseract verified once, in Docker, on the synthetic samples only |
+| Receipt upload, OCR, field extraction | Yes | `backend/app/parser.py` (`run_ocr`, `parse_fields`, `locate_boxes`). `parse_fields` now also returns the printed `date` and `time` as strings; `app/consistency.py` decides what they mean | `test_verify.py::test_parse_fields`, `test_consistency.py::test_the_printed_date_and_time_are_read_into_the_fields` (stubbed OCR); real Tesseract verified once, in Docker, on the synthetic samples only |
 | Reference format validation | Yes | `backend/app/verify.py`, length from `config.REF_LENGTH` | `test_engine.py::test_missing_reference` |
 | Replay protection (one reference, one order) | Yes | `ledger.consumed_order`, `verify.py` DUPLICATE branch | `test_engine.py::test_verified_then_duplicate`, `test_settle.py::test_one_payment_settles_one_order_only`, `test_real_receipt_cannot_be_reused_on_another_order` |
 | Ledger match, late-alert resolution | Yes | `backend/app/ingest.py`, `verify.py::resolve_pending` | 3 tests in `test_engine.py`, 1 in `test_settle.py` |
@@ -27,7 +27,7 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **69 tests passing**
 | `docs/DEVICE_TEST.md` | **No** | - | Referenced twice in the README |
 | Exact-file reuse check (SHA-256 of the upload) | Yes | `backend/app/fingerprint.py`, `verifications.sha256` + index, runs before the reference gate in `verify.py` | `test_fingerprint.py` (7), incl. the limits pinned below |
 | Image perceptual hash (dHash) | **No - measured and rejected** | - | See "Perceptual hash: the measurement" below |
-| Alert-free consistency checks | **No** | - | Brief task 3 |
+| Alert-free consistency checks | Yes, as **signals only** | `backend/app/consistency.py` (4 pure checks), collected in `verify._verify`, returned as `signals` on every verdict, stored in `verifications.signals` (+ `printed_at`), shown in the dashboard banner, review queue, evidence timeline and as a count on the overlay. Every threshold is a config value | `test_consistency.py` (50): each check on its own, then the same verdict with and without a signal, storage, and the legacy-row path. **No real receipt has been through them** - see "Signals: what was decided and why" |
 | AI-assisted reader, `eval/run_eval.py`, `docs/AI_EVAL.md` | **No** | - | Brief task 7, gated and last priority |
 | Staff mode, PINs, `/reconcile/daily` | **No** | - | Explicitly Deferred in the brief |
 
@@ -42,6 +42,7 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **69 tests passing**
 - Verdict labels (brief task 1) are built. One mapping decision is not spelled out by the brief: `SUSPECTED_FAKE` is also returned for an unreadable image or a missing reference, and those are labelled "Can't confirm yet" rather than "Likely edited", because nothing was contradicted. The README's verdict table was rewritten to match, and the messages under the label still say what to do.
 - The label wording was checked by rendering `index.html` and `overlay.html` against a throwaway database holding one verdict per label (2026-10-23, local servers, seeded rows rather than real OCR - Tesseract is not installed on this machine). That is a manual look, not a test: the UI still has no automated coverage.
 - Two UI strings still named GCash/Maya as if the tool were limited to them (the dashboard subtitle and the QR registration hint). Reworded; the alert-text placeholder keeps its GCash example because it is an example.
+- Two README sentences said the receipt parser reads only a reference and an amount ("there is no time field yet", and the same claim in the AI section as something a model would have to prove). Both became false the moment the consistency checks needed a printed time: `parse_fields` now returns `date` and `time`. The AI paragraph now claims only what is left - that a model has to prove it reads a glare-covered phone photo better.
 
 ## Perceptual hash: the measurement that killed it
 
@@ -81,6 +82,66 @@ of the pixels, which is enough to move the ELA and sharpness numbers in the READ
 table. The committed files are what those numbers were measured on; if someone
 regenerates them, the measured table has to be re-run and re-stated.
 
+## Signals: what was decided and why
+
+Brief task 3 asked for consistency checks that need no alert, "labelled as signals,
+not proof". Four things had to be decided, and each one changed what the check can
+honestly claim:
+
+- **A reference-length check would have been dead code.** `REF_RE` is built from
+  `config.REF_LENGTH`, so a reference the parser returns always has the expected
+  length and the check could never fire. It now also does the looser look
+  (`REF_RUN_RE`, 8-20 digit runs) and reports the closest number when no reference
+  was found at all: *"No 13-digit reference found; the closest number read was
+  100284913049, 12 digits"*. That is the message a seller can act on, and it fires
+  on the real path - including when OCR mistakes a phone number for a reference.
+- **`PHP` and `₱` are not amount labels.** The amount regex only matches a number
+  that already carries a currency token, so counting the token as the label makes
+  the layout check pass on every receipt and measure nothing. The default label
+  list is field words (`amount`, `total`, `paid`, ...). Consequence, stated plainly:
+  a receipt that prints `PHP 500.00` with no field word raises a signal. Shops that
+  see that as noise add the token to `CHECKIZ_AMOUNT_LABELS`.
+- **A time with no date is not checked.** `20:05` could be ten minutes ago or last
+  night. A date with no time is compared in whole days, so a 48-hour window does
+  not fire on a receipt dated yesterday.
+- **The clock is not UTC.** Receipts carry wall-clock time; comparing them with a
+  UTC server clock reports about 8 hours of age on every receipt. `CHECKIZ_TZ_OFFSET_HOURS`
+  (default 8) is the shop's own clock, and a 30-minute future tolerance absorbs the
+  gap between a buyer's phone and the seller's machine.
+
+Three more things worth recording:
+
+- The checks cannot change a status, and that is enforced by the old suite: making
+  a signal override the verdict fails **35 tests, 27 of them pre-existing** (`test_engine.py`,
+  `test_settle.py`, `test_review.py`, `test_labels.py`, `test_qr.py`, `test_fingerprint.py`) -
+  the rules the alerts feed were already asserting. Turning one check off on its own
+  fails 2-9 tests (reference format 2, printed time 3, the near-miss look 4, layout 7,
+  the aggregate 9, persisting them 5), so none of them is decoration. Each number above
+  is a run, not an estimate, and the tree was restored afterwards.
+- One engine test failed the first time it ran in the afternoon and passed in the
+  morning: it stamped a fixed date on the receipt and compared it against the
+  machine's real clock. Engine tests that read a stamped receipt now pin
+  `consistency.shop_now`. Any future test that forgets to will be time-dependent.
+- The four example messages in the README's signals table are the strings the code
+  actually returns, printed by calling the four checks with those inputs rather
+  than written by hand. The clock is asserted in both directions through the engine:
+  a stale stamp (`test_the_receipts_own_clock_is_checked_against_the_shops`) and a
+  stamp later than this clock (`test_a_stamp_from_later_today_does_not_change_the_verdict`),
+  each with the status pinned as well as the reason.
+
+The dashboard banner, review queue, evidence panel and overlay count were then
+looked at in a browser against a throwaway database with OCR stubbed (2026-10-23,
+`/tmp` database, port 8013) - a receipt stamped 08:05 while the machine read 04:49
+rendered as *"Can't confirm yet / Receipt says 2026-10-23 08:05 AM / ⓘ One thing to
+check / • Receipt shows 2026-10-23 08:05 AM, later than this clock"*. That is a
+manual look at the wording and layout, not a test.
+
+What is **not** known: whether any of these thresholds is right. The amount range,
+the 48-hour window and the label words have never been run against a genuine
+receipt, and no wallet's real receipt template is in this repo. They are plausible
+defaults until task 5 (real-device alert wording) and task 6 (calibration) replace
+them with measured ones.
+
 ## What no test covers
 
-The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour, and anything requiring a wallet's actual alert wording. The 69 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour, the consistency thresholds against genuine receipts, and anything requiring a wallet's actual alert wording. The 119 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.

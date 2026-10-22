@@ -32,7 +32,9 @@ async function poll() {
       lastId = r.id;
       const card = document.getElementById("card");
       card.className = r.status; card.style.display = "block";
+      const n = (r.signals || []).length;
       card.innerHTML = `Order #${esc(r.order_id)}: <strong>${esc(r.label || r.status.replace("_", " "))}</strong>` +
+        (n ? ` <em>${n} thing${n > 1 ? "s" : ""} to check</em>` : "") +
         `<small>${esc(r.message)}</small>`;
     }
   } catch (e) {}

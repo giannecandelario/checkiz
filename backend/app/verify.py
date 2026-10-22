@@ -1,6 +1,8 @@
+import json
 import time
 
-from .db import get_conn
+from . import consistency
+from .db import get_conn, json_field
 from .config import CONFIRM_ABOVE
 from .fingerprint import find_exact_repeat, image_sha256
 from .labels import FORENSIC, MISMATCH, label_for
@@ -17,9 +19,11 @@ def add_claim(ref: str, order_id: str):
     with get_conn() as conn:
         conn.execute("INSERT INTO claims (ref, order_id) VALUES (?, ?)", (ref, order_id))
 
-def result(status, message, fields, forensics, order_id, warning=None, reason=None, **extra):
+def result(status, message, fields, forensics, order_id, warning=None, reason=None,
+           signals=(), **extra):
     out = {"status": status, "label": label_for(status, reason), "message": message,
-           "fields": fields, "forensics": forensics, "order_id": order_id, **extra}
+           "fields": fields, "forensics": forensics, "order_id": order_id,
+           "signals": list(signals), **extra}
     if warning:
         out["warning"] = warning
     return out
@@ -48,39 +52,45 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
     text, data = run_ocr(img)
     fields = parse_fields(text)
     ref, amount = fields["ref"], fields["amount"]
+    # Everything below carries the same alert-free signals: what this receipt says
+    # about itself. They are reasons to look, never a status of their own.
+    checks = consistency.signals(fields, text)
+
+    def verdict(*args, **kwargs):
+        return result(*args, signals=checks, **kwargs)
 
     # 1. The very same file was already checked for another order. This runs
     # before the reference gate on purpose: a re-sent screenshot is a repeat
     # even when OCR cannot read a single field of it.
     hit = find_exact_repeat(sha, order_id)
     if hit:
-        return result("DUPLICATE",
-                      f"This is the same image file already checked for Order #{hit['order_id']}",
-                      fields, {}, order_id)
+        return verdict("DUPLICATE",
+                       f"This is the same image file already checked for Order #{hit['order_id']}",
+                       fields, {}, order_id)
 
     # 2. Structure
     if not ref:
-        return result("SUSPECTED_FAKE", "Missing or invalid reference number",
-                      fields, {}, order_id)
+        return verdict("SUSPECTED_FAKE", "Missing or invalid reference number",
+                       fields, {}, order_id)
 
     # 3. Duplicate
     claim = get_claim(ref)
     if claim and str(claim["order_id"]) == str(order_id):  # same buyer re-sending: idempotent
-        return result("VERIFIED", f"Order #{order_id} is already settled with Ref {ref}",
-                      fields, {}, order_id)
+        return verdict("VERIFIED", f"Order #{order_id} is already settled with Ref {ref}",
+                       fields, {}, order_id)
     if claim:
-        return result("DUPLICATE",
-                      f"Ref {ref} was already claimed on Order #{claim['order_id']}",
-                      fields, {}, order_id)
+        return verdict("DUPLICATE",
+                       f"Ref {ref} was already claimed on Order #{claim['order_id']}",
+                       fields, {}, order_id)
 
     # Order binding: an order issued with a coded amount can only be paid by that amount,
     # so a genuine receipt from a different order cannot be reused here.
     order = get_order(order_id)
     issued = order["amount"] if order and order["coded"] else None
     if issued is not None and amount is not None and abs(amount - issued) > 0.01:
-        return result("SUSPECTED_FAKE",
-                      f"Receipt shows {amount:.2f} but Order #{order_id} was issued for {issued:.2f}",
-                      fields, {}, order_id, reason=MISMATCH)
+        return verdict("SUSPECTED_FAKE",
+                       f"Receipt shows {amount:.2f} but Order #{order_id} was issued for {issued:.2f}",
+                       fields, {}, order_id, reason=MISMATCH)
 
     # Forensics
     boxes = locate_boxes(data, amount, ref)
@@ -89,13 +99,13 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
     # 4. Ledger checks
     entry = find_entry(ref)
     if entry and entry["consumed_order"] and str(entry["consumed_order"]) != str(order_id):
-        return result("DUPLICATE",
-                      f"Payment {ref} already settled Order #{entry['consumed_order']}",
-                      fields, {}, order_id)
+        return verdict("DUPLICATE",
+                       f"Payment {ref} already settled Order #{entry['consumed_order']}",
+                       fields, {}, order_id)
     if entry and amount is not None and abs(entry["amount"] - amount) > 0.01:
-        return result("SUSPECTED_FAKE",
-                      f"Amount mismatch: receipt {amount:.2f}, ledger {entry['amount']:.2f}",
-                      fields, forensics, order_id, reason=MISMATCH)
+        return verdict("SUSPECTED_FAKE",
+                       f"Amount mismatch: receipt {amount:.2f}, ledger {entry['amount']:.2f}",
+                       fields, forensics, order_id, reason=MISMATCH)
 
     # Policy: a ledger match (ref + amount) is the strongest signal, so it is
     # never overridden by the probabilistic image check. The flag is returned
@@ -116,25 +126,25 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
         warning = " ".join(warnings) or None
         add_claim(ref, order_id)
         settle_order(order_id, ref)
-        return result("VERIFIED",
-                      f"Ref {ref} matched incoming payment of {entry['amount']:.2f}",
-                      fields, forensics, order_id, warning,
-                      trust=entry["source"], needs_app_check=bool(chk))
+        return verdict("VERIFIED",
+                       f"Ref {ref} matched incoming payment of {entry['amount']:.2f}",
+                       fields, forensics, order_id, warning,
+                       trust=entry["source"], needs_app_check=bool(chk))
     warning = " ".join(warnings) or None
 
     # 6. Forensic flag with no ledger confirmation
     if forensics["flagged"]:
-        return result("SUSPECTED_FAKE",
-                      "Image shows signs of editing on the amount or reference fields",
-                      fields, forensics, order_id, reason=FORENSIC)
+        return verdict("SUSPECTED_FAKE",
+                       "Image shows signs of editing on the amount or reference fields",
+                       fields, forensics, order_id, reason=FORENSIC)
 
     # 7. Pending: remember it so a late SMS can resolve it automatically
     with get_conn() as conn:
         conn.execute("INSERT OR REPLACE INTO pending (ref, order_id, amount) VALUES (?, ?, ?)",
                      (ref, order_id, amount))
-    return result("PENDING_MATCH",
-                  "Receipt looks valid but no matching payment in the ledger yet",
-                  fields, forensics, order_id)
+    return verdict("PENDING_MATCH",
+                   "Receipt looks valid but no matching payment in the ledger yet",
+                   fields, forensics, order_id)
 
 
 def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
@@ -147,17 +157,24 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
     res["sha256"] = sha
     f = res.get("fields") or {}
     log_verdict(order_id, res["status"], res["message"], f.get("amount"), f.get("ref"),
-                res["elapsed_ms"], res.get("needs_app_check"), res["label"], sha)
+                res["elapsed_ms"], res.get("needs_app_check"), res["label"], sha,
+                res["signals"], {k: f.get(k) for k in ("date", "time") if f.get(k)})
     return res
 
 def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False,
-                label=None, sha256=None):
+                label=None, sha256=None, signals=None, printed_at=None):
+    """`signals` and `printed_at` are stored as they were read: a receipt whose
+    own date said nothing, or that contradicted itself, has to look the same way
+    when the seller reads the evidence record days later."""
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms, "
-            "needs_app_check, label, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "needs_app_check, label, sha256, signals, printed_at) VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check)),
-             label or label_for(status), sha256),
+             label or label_for(status), sha256,
+             json.dumps(signals) if signals else None,
+             json.dumps(printed_at) if printed_at else None),
         )
 
 def get_stats():
@@ -220,5 +237,7 @@ def list_history(limit: int = 20):
             row = dict(r)
             # rows written before the label existed are labelled from their status
             row["label"] = row.get("label") or label_for(row["status"])
+            row["signals"] = json_field(row.get("signals"), [])
+            row["printed_at"] = json_field(row.get("printed_at"), {})
             out.append(row)
         return out

@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 69 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 119 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -46,6 +46,21 @@ Sources (link status checked 2026-10-23):
 
 The API returns both a machine status (`VERIFIED`, `DUPLICATE`, `SUSPECTED_FAKE`, `PENDING_MATCH`) and the plain `label` above. The codes did not change; the label is derived from the code plus which check produced it, because `SUSPECTED_FAKE` covers three different things a seller should do next. A receipt that cannot be read is labelled "Can't confirm yet", not "Likely edited" - nothing was contradicted. The dashboard, overlay, review queue and evidence view show the labels. Mapping: [`backend/app/labels.py`](backend/app/labels.py), tests in `backend/tests/test_labels.py`.
 
+### Signals, not proof
+
+Four checks ask what a receipt says about itself, with no payment alert involved ([`backend/app/consistency.py`](backend/app/consistency.py)):
+
+| Check | Example of what it reports |
+|---|---|
+| Reference format | "No 13-digit reference found; the closest number read was 100284913049, 12 digits" |
+| Amount format and range | "Amount 60000.00 is outside the 1.00-50000.00 range this shop is set for" |
+| Printed date and time | "Receipt shows 2026-10-01 09:00, about 534 hours old - this shop treats 48 hours as current"; a stamp later than this clock |
+| Layout against the template | "Reference 1002849130490 was read from a line with no reference label beside it" |
+
+**None of them can change a verdict.** A genuine receipt fails these for ordinary reasons: the photo came in at an odd angle, a wallet words its receipt differently, the phone's clock and the server's do not agree, or the shop has not set its own amount range yet. So a signal is a line to read next to the verdict, never a "fake". The hard rules are unchanged: no reference to match on, a reference already claimed, an amount that contradicts the ledger or the order's coded QR.
+
+They appear as `signals` in the verdict response, in the review queue, in the evidence timeline, and as a count on the OBS overlay. The ranges, the accepted age of a receipt, the date spellings and the label words are all environment variables (below) because they belong to the shop and the wallet, not to the code. A time printed without a date is deliberately not checked: `20:05` could be ten minutes ago or last night, and a guess there would produce signals a seller stops reading.
+
 **What Checkiz cannot do:** prove a receipt is fake from the image alone. A clean, AI-generated receipt can look perfect. Image analysis is a secondary signal. **Confirm large payments in the wallet app.**
 
 ### Measured so far (honest)
@@ -72,7 +87,7 @@ Limits: it only covers orders made through Checkiz's QR page. The wallet may ign
 ## How it works
 
 1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, or (c) pasted text. Each entry records its source, and sources have different trust (see below).
-2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number and the amount (there is no time field yet). The file's hash is compared with earlier checks, then reference format and replay, then the ledger.
+2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number, the amount, and the date and time printed on the receipt. The file's hash is compared with earlier checks, then reference format and replay, then the ledger. Alongside the verdict, the receipt is also read against itself (see **Signals, not proof** below).
 3. **Settlement:** a ledger match (or an alert that matches an open coded order) settles the order. The order is locked to that payment.
 4. **Review queue:** anything unresolved, suspicious, duplicate, or needing an in-app confirmation is listed for the seller. Receipt images are not stored, only extracted fields and the verdict.
 
@@ -105,7 +120,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
 | Reuse by identical file (SHA-256 of the upload, image never stored) | Built, tested ([`backend/app/fingerprint.py`](backend/app/fingerprint.py)) |
 | Reuse by perceptual image hash | **Not built.** Measured on template-identical receipts and rejected: a different payment hashes closer than a re-saved copy. Numbers in [`docs/STATUS.md`](docs/STATUS.md) |
-| Consistency checks that need no alert (format, amount range, time plausibility, layout) | Planned - note there is no time field extracted yet |
+| Consistency checks that need no alert (reference format, amount range, printed time, layout) | Built, tested as signals only ([`backend/app/consistency.py`](backend/app/consistency.py)). Never checked against real receipts, so the thresholds are guesses |
 | Optional AI-assisted reading (extraction only, off by default, gated by evaluation) | Planned |
 | Real-device test, calibration on genuine receipts, seller interviews | Not done |
 
@@ -125,7 +140,7 @@ Checkiz is a low-friction first check. It is not better overall than the options
 
 ## Optional AI-assisted reading (planned, off by default)
 
-Phone photos of screens are where plain OCR is weakest. An optional vision model may read the reference, amount and time more accurately - plain OCR today returns only the reference and the amount, so extracting the time is part of what the model would have to prove. It is **extraction only**: it never decides whether a receipt is real. If it disagrees with standard OCR, the result is "Can't confirm yet". It requires explicit consent, is off by default, and falls back automatically to standard OCR when unavailable. It will be enabled as an option only if a measured comparison on real and edited receipts (including phone photos) shows an improvement; the README will report that result with the number of receipts, including if it shows none. Provider and data terms read before this was written: [`docs/AI_PRIVACY.md`](docs/AI_PRIVACY.md).
+Phone photos of screens are where plain OCR is weakest. An optional vision model may read the reference, amount and time more accurately - standard OCR now extracts a printed date and time as well, but only from receipts whose wording it recognises, so reading them from a glare-covered photo is still something the model would have to prove. It is **extraction only**: it never decides whether a receipt is real. If it disagrees with standard OCR, the result is "Can't confirm yet". It requires explicit consent, is off by default, and falls back automatically to standard OCR when unavailable. It will be enabled as an option only if a measured comparison on real and edited receipts (including phone photos) shows an improvement; the README will report that result with the number of receipts, including if it shows none. Provider and data terms read before this was written: [`docs/AI_PRIVACY.md`](docs/AI_PRIVACY.md).
 
 ## Privacy and responsible use
 
@@ -165,7 +180,7 @@ Tests: `cd backend && pytest` (OCR is stubbed, Tesseract not needed). Docker: `d
 
 A scripted demo on a throwaway database (`backend/demo.py`) is planned and **not in the repo yet**; until it exists, the way to see the logic without a phone is to upload the synthetic samples above. It would use the **synthetic** samples, so it shows the logic, not accuracy on real receipts.
 
-Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8).
+Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8). For the consistency signals: `CHECKIZ_AMOUNT_MIN` (1.00), `CHECKIZ_AMOUNT_MAX` (50000.00), `CHECKIZ_RECEIPT_MAX_AGE_HOURS` (48), `CHECKIZ_TZ_OFFSET_HOURS` (8), `CHECKIZ_DATE_FORMATS`, `CHECKIZ_AMOUNT_LABELS`, `CHECKIZ_REF_LABELS`, `CHECKIZ_LAYOUT_LABEL_WINDOW` (1). The two label lists are what make the layout check follow a wallet's wording instead of assuming one.
 
 ### Demo scenarios
 
@@ -176,6 +191,7 @@ Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECK
 | Real receipt for another order | Genuine receipt submitted for a different coded order | Rejected: amount belongs to a different order |
 | Genuine receipt | Matches a ledger alert | Verified |
 | Reused receipt | Same reference again | Reused |
+| Receipt that contradicts itself | Amount outside the shop's set range, or a printed time later than this clock | Verdict unchanged, the reason listed under `signals` |
 
 Each row above is asserted by a test in `backend/tests/`. Demo order note: upload `edited.png` before `real.png`, because the edited copy shares the real receipt's reference number.
 
@@ -191,7 +207,7 @@ Core (the one user, the one job):
 - [ ] `backend/demo.py` scripted demo on a throwaway database
 - [x] Reuse detection by identical file (hash of the upload; the image is not stored)
 - [ ] ~~Image perceptual hash for reuse~~ measured and rejected - it cannot tell two different receipts apart. Details in `docs/STATUS.md`
-- [ ] Consistency checks that do not need alerts (reference format, amount format, time plausibility, layout)
+- [x] Consistency checks that do not need alerts (reference format, amount format and range, printed time, layout) - reported as signals beside the verdict; their thresholds are still guesses until real receipts are measured
 - [ ] **Real-device alert test** (`docs/DEVICE_TEST.md`) and fallback: OCR of the seller's own Transactions screen into the ledger
 - [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates
 - [ ] Interviews with a few real sellers to validate the problem

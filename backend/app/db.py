@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -48,6 +49,8 @@ CREATE TABLE IF NOT EXISTS verifications (
     needs_app_check INTEGER DEFAULT 0,
     label TEXT,
     sha256 TEXT,
+    signals TEXT,
+    printed_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS review_ack (
@@ -62,6 +65,16 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     return conn
 
+def json_field(value, default):
+    """Read a column stored as JSON text. Empty or hand-edited rows fall back to
+    the default instead of breaking a report someone needs mid-stream."""
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except ValueError:
+        return default
+
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
@@ -71,6 +84,8 @@ def init_db():
             ("verifications", "needs_app_check", "INTEGER DEFAULT 0"),
             ("verifications", "label", "TEXT"),
             ("verifications", "sha256", "TEXT"),
+            ("verifications", "signals", "TEXT"),
+            ("verifications", "printed_at", "TEXT"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
             ("qr_orders", "status", "TEXT DEFAULT 'OPEN'"),

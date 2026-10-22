@@ -7,6 +7,16 @@ from .config import REF_LENGTH
 
 AMOUNT_RE = re.compile(r"(?:PHP|₱|P)\s?([\d,]+\.\d{2})")
 REF_RE = re.compile(rf"(?<!\d)(\d(?: ?\d){{{REF_LENGTH - 1}}})(?!\d)")  # REF_LENGTH digits, optional single spaces
+# Date and time are only read as strings; app/consistency.py decides what they
+# mean, so a wallet that words them differently is a config change, not a code
+# change. Receipts that show neither (or a photo where OCR misses them) simply
+# produce no signal.
+MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+DATE_RE = re.compile(rf"(\d{{4}}-\d{{2}}-\d{{2}}"
+                     rf"|\d{{1,2}}[/.-]\d{{1,2}}[/.-]\d{{4}}"
+                     rf"|\d{{1,2}} {MONTH} \d{{4}}"
+                     rf"|{MONTH} \d{{1,2}},? \d{{4}})", re.IGNORECASE)
+TIME_RE = re.compile(r"(?<![\d:.])(\d{1,2}:\d{2}(?::\d{2})? ?(?:[AP]\.?[Mm]\.?)?)(?![\d:])")
 
 def load_image(data: bytes):
     arr = np.frombuffer(data, np.uint8)
@@ -28,7 +38,11 @@ def parse_fields(text: str) -> dict:
     r = REF_RE.search(text)
     if r:
         ref = re.sub(r"\s", "", r.group(1))
-    return {"amount": amount, "ref": ref}
+    d = DATE_RE.search(text)
+    t = TIME_RE.search(text)
+    return {"amount": amount, "ref": ref,
+            "date": d.group(1) if d else None,
+            "time": t.group(1).strip() if t else None}
 
 def locate_boxes(data: dict, amount, ref, scale: int = 2):
     """Return (x, y, w, h) boxes in original-image coordinates for tokens

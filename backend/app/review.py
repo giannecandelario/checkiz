@@ -5,7 +5,7 @@ merges two sources the seller would otherwise have to cross-read by hand: the
 verdict log (which covers any order ID a receipt mentioned) and the order board
 (which knows about QRs that were issued but never paid)."""
 from .config import ORDER_TTL_HOURS
-from .db import get_conn
+from .db import get_conn, json_field
 from .labels import label_for
 
 # A latest verdict of these still needs a person. VERIFIED only appears when the
@@ -17,7 +17,7 @@ def review_list():
     with get_conn() as conn:
         verdicts = [dict(r) for r in conn.execute(
             f"""SELECT v.id, v.order_id, v.status, v.label, v.message, v.amount, v.ref,
-                       v.created_at, v.needs_app_check
+                       v.created_at, v.needs_app_check, v.signals
                 FROM verifications v
                 WHERE (v.status IN {_UNRESOLVED} OR v.needs_app_check = 1)
                   AND v.id = (SELECT MAX(id) FROM verifications WHERE order_id = v.order_id)
@@ -38,11 +38,12 @@ def review_list():
         label = (v["label"] or label_for(v["status"])) if reason in _UNRESOLVED else None
         out[str(v["order_id"])] = {"order_id": v["order_id"], "reason": reason, "label": label,
                                    "detail": v["message"], "amount": v["amount"],
-                                   "ref": v["ref"], "seen_at": v["created_at"]}
+                                   "ref": v["ref"], "seen_at": v["created_at"],
+                                   "signals": json_field(v["signals"], [])}
     for o in unpaid:
         out.setdefault(str(o["order_id"]), {
             "order_id": o["order_id"], "reason": "UNPAID_EXPIRED", "amount": o["amount"],
-            "ref": None, "seen_at": o["created_at"],
+            "ref": None, "seen_at": o["created_at"], "signals": [],
             "detail": f"QR issued for {o['amount']:.2f}, no matching payment within "
                       f"{ORDER_TTL_HOURS:g} hours"})
     return sorted(out.values(), key=lambda i: i["seen_at"] or "", reverse=True)

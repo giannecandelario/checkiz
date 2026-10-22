@@ -109,6 +109,12 @@ async function send(file) {
     banner.className = r.status;
     banner.innerHTML = `<strong>${esc(r.label || r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
       (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
+      (r.fields && (r.fields.date || r.fields.time)
+        ? `<small>Receipt says ${esc([r.fields.date, r.fields.time].filter(Boolean).join(" "))}</small>` : "") +
+      (r.signals && r.signals.length
+        ? `<small>&#9432; ${esc(r.signals.length == 1 ? "One thing to check" :
+                               r.signals.length + " things to check")}</small>` +
+          r.signals.map(s => `<small>&#8226; ${esc(s)}</small>`).join("") : "") +
       `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
     loadLedger(); loadHistory(); loadOrders(); loadReview();
   } catch (err) {
@@ -142,7 +148,8 @@ async function loadReview() {
   $("reviewCount").textContent = rows.length ? `(${rows.length})` : "- nothing";
   $("review").querySelector("tbody").innerHTML = rows.map(r =>
     `<tr><td>#${esc(r.order_id)}</td><td><span class="badge ${esc(r.reason)}">${esc(r.label || LABEL[r.reason] || r.reason)}</span></td>` +
-    `<td>${esc(r.detail)}${r.amount == null ? "" : ` <small>(${Number(r.amount).toFixed(2)})</small>`}</td>` +
+    `<td>${esc(r.detail)}${r.amount == null ? "" : ` <small>(${Number(r.amount).toFixed(2)})</small>`}` +
+    (r.signals?.length ? `<small>&#9432; ${r.signals.map(esc).join(" · ")}</small>` : "") + `</td>` +
     `<td><button type="button" class="why" data-o="${esc(r.order_id)}">why</button> ` +
     `<button type="button" class="ok" data-o="${esc(r.order_id)}">reviewed</button></td></tr>`).join("")
     || `<tr><td colspan="4"><small>Nothing to review. Every order is settled or still waiting on a payment alert.</small></td></tr>`;
@@ -165,7 +172,9 @@ async function showEvidence(order) {
     const steps = ev.timeline.map(t =>
       `<li><small>${esc(t.at)} UTC</small> ` +
       (t.kind === "verdict" ? `<span class="badge ${esc(t.status)}">${esc(t.label || t.status.replace("_", " "))}</span>`
-                            : `<em>${esc(t.kind)}</em>`) + ` ${esc(t.detail)}</li>`).join("");
+                            : `<em>${esc(t.kind)}</em>`) + ` ${esc(t.detail)}` +
+      (t.signals?.length ? `<small>&#9432; ${t.signals.map(esc).join(" · ")}</small>` : "") +
+      `</li>`).join("");
     box.hidden = false;
     box.innerHTML = `<strong>Order #${esc(order)}</strong> <small>` +
       (ev.issued ? `QR issued for ${Number(ev.issued.amount).toFixed(2)}, ${esc(ev.issued.status)}`
