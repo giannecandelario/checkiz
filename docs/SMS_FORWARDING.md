@@ -1,6 +1,6 @@
 # Payment alert feed
 
-Checkiz fills its ledger from the seller's incoming payment alerts, so nobody has to open GCash or Maya during a stream. The ledger is only as good as this feed, so there are three ways in, in order of trust.
+Checkiz fills its ledger from the seller's incoming payment alerts, so nobody has to open the wallet or banking app during a stream. Any provider that raises a notification or sends an SMS can feed it; the parser wording is what varies. The ledger is only as good as this feed, so there are three ways in, in order of trust.
 
 | Source | Endpoint | Trust | Notes |
 |---|---|---|---|

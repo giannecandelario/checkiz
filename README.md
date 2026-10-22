@@ -1,14 +1,14 @@
 # Checkiz
 
-Order-bound payment checking for Filipino social commerce sellers.
+Order-bound payment checking for Filipino online sellers.
 
-**Target user:** small online sellers (MSMEs) on TikTok Live, Facebook, and Viber who take GCash/Maya payments by personal wallet, with no payment gateway and no one to watch the app during a rush.
+**Target user:** small online sellers (MSMEs) on TikTok Live, Facebook, and Viber who get paid by personal wallet or personal bank account - GCash, Maya, ShopeePay, a bank app - with no payment gateway and no one to watch the apps during a rush.
 
-Checkiz does two things. It settles orders straight from the seller's own payment alerts, and it checks receipt screenshots for the buyers who still send them. It sits between a buyer's payment submission and the seller's order fulfillment. It reads an uploaded GCash/Maya receipt, checks the image for tampering, and matches the reference number against the seller's incoming transaction log.
+Checkiz does two things. It settles orders straight from the seller's own payment alerts, and it checks receipt screenshots for the buyers who still send them. It sits between a buyer's payment submission and the seller's order fulfillment. It reads an uploaded payment receipt, checks the image for tampering, and matches the reference number against the seller's incoming transaction log. It is not tied to one wallet, because it keys on what every payment produces: a reference number and an amount.
 
 ## The Problem
 
-Sellers on TikTok Live, Facebook, Instagram, and Viber are targeted by the "Canva scam": buyers use Canva or Photoshop templates to fake GCash/Maya receipts, editing the amount, timestamp, and reference number. During a live stream, orders arrive faster than a seller can open the wallet app and read a 13-digit reference number for each one, so they ship against proof they never actually verified and lose both inventory and shipping fees.
+Sellers on TikTok Live, Facebook, Instagram, and Viber are targeted by the "Canva scam": buyers use Canva or Photoshop templates to fake payment receipts - GCash and Maya are the usual forgeries because that is where the money moves - editing the amount, timestamp, and reference number. During a live stream, orders arrive faster than a seller can open an app and read a reference number for each one, so they ship against proof they never actually verified and lose both inventory and shipping fees.
 
 This is not a hypothetical. GCash itself has warned about AI-generated fake receipt screenshots and tells payees to confirm a payment in the app's Transactions tab instead of trusting an image the sender sent ([Mynt newsroom, Jul 2025](https://mynt.com.ph/newsroom/gcash-warns-public-on-emerging-ai-generated-fake-receipts-scams-urges-users-to-always-check-transactions-tab)). Online selling fraud big enough to make the news is still happening in this market - police reported a ₱1.4 million online tire scam suspect in October 2026 ([Tribune](https://tribune.net.ph/2026-10-16/p14-m-online-tire-scam-suspect-collared)), though that report is about the sale, not specifically a forged receipt.
 
@@ -18,7 +18,7 @@ This is not a hypothetical. GCash itself has warned about AI-generated fake rece
 2. **OCR and parsing:** extracts amount, reference number, timestamp, and recipient.
 3. **Tampering analysis:**
    - Compression check (built): error-level analysis and local sharpness on the Amount and Reference Number fields.
-   - Font check (not built): would compare font family, size, and kerning against GCash/Maya UI specs.
+   - Font check (not built): would compare font family, size, and kerning against the receipt screen of the app the seller actually uses - which is the reason it is not built yet, since that differs per provider.
 4. **Ledger matching:** compares the reference number against the seller's incoming transaction log (SMS/email alerts, or a mock ledger in the prototype).
 5. **Verdict:**
 
@@ -39,7 +39,26 @@ The obvious question is "is this receipt real?". Checkiz also asks "was this pay
 2. When the matching payment alert arrives, **the order settles itself. The buyer doesn't need to send a screenshot, and the seller doesn't need to open the wallet app.** The live order board and the stream overlay show it as paid.
 3. If a buyer does send a receipt, its amount must equal the amount issued for that order. A genuine receipt from another order, or from a different payment, can't be reused, and one payment can only settle one order.
 
-This works with ordinary personal-wallet transfers, so no business registration or gateway is needed. Its limits: amount matching only covers orders made through Checkiz's QR, the wallet may ignore the reference label (the centavo code is the fallback), and an unrelated payment that happens to equal an open order's exact amount within the 24-hour window would match it (the window is `CHECKIZ_ORDER_TTL_HOURS`).
+This works with ordinary personal transfers, so no business registration or gateway is needed. Its limits: amount matching only covers orders made through Checkiz's QR, the receiving app may ignore the reference label (the centavo code is the fallback), and an unrelated payment that happens to equal an open order's exact amount within the 24-hour window would match it (the window is `CHECKIZ_ORDER_TTL_HOURS`).
+
+## Not tied to one wallet
+
+A small seller's money arrives through GCash, Maya, ShopeePay, a bank app, or a plain bank transfer, often two or three of those on the same day. Checkiz models none of them specifically. It keys on what every payment produces: a reference number and an amount.
+
+| Part | Why it is not provider-specific |
+|---|---|
+| Ledger reconciliation | Entries are keyed by reference number, then settled by comparing the amount. No provider name appears anywhere in that path. |
+| Alert intake | Three sources in trust order: app notification, SMS, pasted text. Which apps count as trusted is an env var (`CHECKIZ_APP_PACKAGES`), so adding a bank app is a package name, not a code change. |
+| Order binding | QR Ph is the national standard supervised by the BSP, and one QR Ph is payable from both bank and e-money accounts ([PayMongo's QR Ph doc](https://docs.paymongo.com/docs/payment-acceptance-qr-ph), [QR Ph on Wikipedia](https://en.wikipedia.org/wiki/QR_Ph)). The coded amount lives in the shared EMVCo payload, not in a wallet's own feature. |
+| Receipt reference | The digit count the parser searches for is built from `CHECKIZ_REF_LENGTH` (default 13), not hard-coded ([backend/app/parser.py:9](backend/app/parser.py#L9)). |
+
+What *is* coupled, and what an added provider would actually need:
+
+- **Currency formatting.** Both parsers need a currency token and two decimals: the alert parser accepts `PHP` / `₱` / `PhP` ([backend/app/ledger.py:6](backend/app/ledger.py#L6)), the receipt parser also a bare `P` ([backend/app/parser.py:8](backend/app/parser.py#L8)). An amount written `1,250` with no symbol and no cents parses as nothing.
+- **English alert wording.** Text only counts as money-in when it matches `received|credited|money in|you got` ([backend/app/ledger.py:9](backend/app/ledger.py#L9)). Bank SMS phrase this differently often enough to need per-provider tests.
+- **The `Ref` label.** A reference number is only read after `Ref` / `Reference No` / `Ref. #` ([backend/app/ledger.py:7](backend/app/ledger.py#L7)). Without it the entry gets a synthetic hash key, which still matches on amount but can no longer be checked for replay.
+
+And nothing here has been validated against a second provider: every measured number in this README came from a synthetic GCash-style receipt, and the QR payload was written from the general EMVCo spec without the BSP book or a real bank QR ([docs/QR_PH.md](docs/QR_PH.md) says the same). "Not tied to one wallet" describes the design, not a tested multi-bank capability.
 
 ## After the stream: the review list
 
@@ -190,6 +209,7 @@ Read this table honestly:
 - [~] Alert feed: SMS, wallet-app notification and paste endpoints with trust levels (Termux scripts untested on a device; no native app yet)
 - [x] OBS overlay (basic browser source: `frontend/overlay.html`)
 - [~] QR Ph order-reference generator (built on the EMVCo format; wallet behaviour with the order reference is untested)
+- [ ] Provider parsers beyond GCash-style wording (a bank SMS feed, ShopeePay), each with its own samples and tests
 - [ ] Messenger / Viber integration
 - [ ] Hosted setup, so a seller is not asked to run Termux and an API key themselves
 - [ ] Buyer-side payment page that shows the exact coded amount for the order
@@ -202,8 +222,9 @@ Read this table honestly:
 - Forensic detection is probabilistic and its thresholds are untuned; treat flags as signals, not guarantees.
 - Auto-settlement relies on amounts being unique per open order, so it only covers orders made through Checkiz's QR page.
 - Notification-reading and wallet behavior with QR Ph order references are untested on real devices.
-- Receipt layouts and alert wording change when GCash/Maya update their apps, so parsers need maintenance.
-- Checkiz is a triage layer, not proof of funds. It does not replace confirming in the wallet app or using a licensed gateway.
+- **Only one provider's wording is exercised.** The design is provider-independent, the parsers are not: alert text and receipt layouts are matched with regexes written against GCash-style samples. Bank and ShopeePay feeds need their own parser plus tests before being claimed.
+- Receipt layouts and alert wording change when any provider updates their app, so parsers need maintenance.
+- Checkiz is a triage layer, not proof of funds. It does not replace confirming in the app the money arrived in - wallet or bank - or using a licensed gateway.
 
 ## Sources
 
@@ -214,12 +235,13 @@ Checked October 2026; only links that resolved and whose content supports the se
 - [Hindi GCash yan: What is SMS spoofing scam](https://technology.inquirer.net/139503/hindi-gcash-yan-what-is-sms-spoofing-scam-and-what-you-shoud-do-when-you-see-one) - Inquirer Technology, 27 Dec 2024. Why SMS-only entries carry `needs_app_check`.
 - [P1.4M online tire scam suspect collared](https://tribune.net.ph/2026-10-16/p14-m-online-tire-scam-suspect-collared) - Tribune, 16 Oct 2026. Online selling fraud at MSME scale is current.
 - Payment-side alternatives: [HitPay PH](https://hitpayapp.com/ph/) and its [online payments guide](https://docs.hitpayapp.com/apis/guide/online-payments), [PayMongo](https://www.paymongo.com/) and its [webhooks docs](https://docs.paymongo.com/docs/webhooks).
+- Why order binding is not wallet-specific: [PayMongo's QR Ph explanation](https://docs.paymongo.com/docs/payment-acceptance-qr-ph) and [QR Ph](https://en.wikipedia.org/wiki/QR_Ph) on Wikipedia - a BSP-supervised national standard payable from bank and e-money accounts alike.
 - Adjacent order tooling: [BigSeller](https://www.bigseller.com/en_US/index.htm), [EasyStore PH](https://www.easystore.co/en-ph), [Prosperna](https://www.prosperna.com/).
 
-Not used, for the record: the GCash Help Center articles return 403 to non-browsers, the PNP anti-scam advisories are Facebook-only, and a PhilStar spoofing piece 404s. No fee percentages are quoted anywhere in this README because none could be confirmed from a primary page.
+Not used, for the record: the BSP's own [QR Ph P2P FAQ](https://www.bsp.gov.ph/Media_and_Research/Primers%20Faqs/QR_Ph_P2P_FAQs.pdf) is the right primary source but returns 403 to non-browsers, so it is cited only through the two pages above; GCash Help Center articles also 403; the PNP anti-scam advisories are Facebook-only; a PhilStar spoofing piece 404s; and an August 2026 report on Apple Pay entering the Philippines 403s, so it is not referenced. No fee percentages are quoted anywhere in this README because none could be confirmed from a primary page.
 
 ## License
 
 MIT (change if needed).
 
-Checkiz is an independent project and is not affiliated with GCash, Maya, or any other e-wallet provider.
+Checkiz is an independent project and is not affiliated with GCash, Maya, ShopeePay, any bank, or any other payment provider. Those names appear only to describe where a seller's money usually comes from.

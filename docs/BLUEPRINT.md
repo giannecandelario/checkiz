@@ -1,10 +1,12 @@
 # Checkiz Blueprint
 
-Design document for Checkiz: a fake-receipt detection filter for Filipino social commerce sellers.
+Design document for Checkiz: a payment-proof triage layer for Filipino online sellers.
 
 ## 1. Overview
 
-Buyers on TikTok Live, Facebook, Instagram, and Viber send screenshots as proof of GCash/Maya payment. Some of these are forged with Canva or Photoshop. Sellers can't verify every receipt at live-stream speed, so they ship goods that were never paid for.
+Buyers on TikTok Live, Facebook, Instagram, and Viber send screenshots as proof of payment. Most of these receipts are GCash or Maya today, but nothing about the forgery is specific to them - any screenshot with an amount and a reference can be edited. Some are forged with Canva or Photoshop. Sellers can't verify every receipt at live-stream speed, so they ship goods that were never paid for.
+
+Checkiz is deliberately not modelled on one provider. Every payment proof carries a reference number and an amount, those two fields are what the engine reconciles, and provider-specific text is meant to stay confined to the parsers.
 
 Checkiz verifies a receipt in three independent ways and returns one verdict:
 
@@ -18,12 +20,12 @@ The ledger check is the strongest signal. Image forensics supports it but is pro
 
 **Goals**
 - Return a verdict in a few seconds per receipt.
-- Work with normal P2P payments (GCash, Maya, QR Ph) and no gateway fees.
+- Work with normal personal transfers - wallet or bank, QR Ph or P2P - and no gateway fees.
 - Catch edited amounts, edited reference numbers, and reused receipts.
 - Run as a self-hosted web app for the hackathon prototype.
 
 **Non-goals (prototype)**
-- Direct integration with GCash/Maya (no public API for micro-sellers).
+- Direct integration with any provider's API. Nothing usable by a micro-seller is public for GCash or Maya, so the feed is built from what the seller's own phone receives instead.
 - Chargeback handling or dispute management.
 - Guaranteed detection of every forgery.
 - Multi-seller SaaS, billing, or user accounts.
