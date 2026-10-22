@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkiz</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  #drop { border: 2px dashed #888; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; }
+  #drop.over { background: #f0f0f0; }
+  input[type=text] { padding: 8px; margin: 12px 0; width: 100%; box-sizing: border-box; }
+  textarea { width: 100%; box-sizing: border-box; padding: 8px; }
+  button { padding: 8px 14px; margin-top: 8px; cursor: pointer; }
+  #banner { margin-top: 20px; padding: 16px; border-radius: 8px; color: #fff; display: none; }
+  .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
+  .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
+  small { display: block; margin-top: 8px; opacity: .85; }
+  h2 { margin-top: 32px; font-size: 1.1rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  td, th { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Checkiz</h1>
+<p>Fake-receipt check for GCash/Maya payments. <a href="qr.html">QR Ph tools</a></p>
+<input type="text" id="order" placeholder="Order ID" value="101">
+<div id="drop">Drop receipt screenshot here or click to choose</div>
+<input id="file" type="file" accept="image/*" hidden>
+<button id="cam" type="button">Take a photo of the receipt</button>
+<input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
+<div id="banner"></div>
+
+<h2>Recent verifications</h2>
+<p id="stats"><small></small></p>
+<table id="history"><thead><tr><th>Order</th><th>Status</th><th>Ref</th><th>Amount</th></tr></thead><tbody></tbody></table>
+<p><small>Streaming? Add <code>overlay.html</code> as an OBS Browser Source.</small></p>
+
+<h2>Live order board</h2>
+<p><small>Orders made on the QR page settle by themselves when the matching payment alert arrives. No screenshot needed.</small></p>
+<table id="orders"><thead><tr><th>Order</th><th>Amount</th><th>Status</th></tr></thead><tbody></tbody></table>
+
+<h2>Ledger (paste alerts)</h2>
+<p><small>Alerts normally arrive from your phone (see docs/SMS_FORWARDING.md). If they don't, paste them here: SMS text or lines copied from the wallet's in-app inbox, separated by a blank line.</small></p>
+<textarea id="sms" rows="3" placeholder="You have received PHP 1,250.00 of GCash from JUAN D. Ref. No. 1002 849 130490."></textarea>
+<button id="addSms">Add to ledger</button>
+<table id="ledger"><thead><tr><th>Ref</th><th>Amount</th><th>Sender</th><th>Source</th></tr></thead><tbody></tbody></table>
+
+<script src="camera.js"></script>
+<script>
+const API = "http://localhost:8000";
+const $ = id => document.getElementById(id);
+const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
+const drop = $("drop"), fileInput = $("file");
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); send(e.dataTransfer.files[0]); };
+fileInput.onchange = () => send(fileInput.files[0]);
+$("cam").onclick = () => cameraCapture(send);
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function send(file) {
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("order_id", $("order").value);
+  const banner = $("banner");
+  banner.style.display = "block"; banner.className = ""; banner.textContent = "Checking...";
+  try {
+    const res = await fetch(API + "/verify", { method: "POST", body: form });
+    const r = await res.json();
+    banner.className = r.status;
+    banner.innerHTML = `<strong>${esc(r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
+      (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
+      `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
+    loadLedger(); loadHistory(); loadOrders();
+  } catch (err) {
+    banner.className = "SUSPECTED_FAKE"; banner.textContent = "Could not reach the server";
+  }
+}
+
+async function loadLedger() {
+  try {
+    const rows = await (await fetch(API + "/ledger", { headers: hdr() })).json();
+    $("ledger").querySelector("tbody").innerHTML = rows.map(r =>
+      `<tr><td>${esc(r.ref)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.sender)}</td><td>${esc(r.source)}</td></tr>`).join("");
+  } catch (e) {}
+}
+
+async function loadOrders() {
+  try {
+    const rows = await (await fetch(API + "/orders", { headers: hdr() })).json();
+    $("orders").querySelector("tbody").innerHTML = rows.map(r =>
+      `<tr><td>#${esc(r.order_id)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.status)}</td></tr>`).join("");
+  } catch (e) {}
+}
+
+async function loadStats() {
+  try {
+    const t = await (await fetch(API + "/stats", { headers: hdr() })).json();
+    const b = t.by_status || {};
+    $("stats").firstChild.textContent = `Total ${t.total} | Verified ${b.VERIFIED || 0} | Pending ${b.PENDING_MATCH || 0} | ` +
+      `Suspected fake ${b.SUSPECTED_FAKE || 0} | Duplicate ${b.DUPLICATE || 0} | Avg ${t.avg_elapsed_ms ?? "-"} ms`;
+  } catch (e) {}
+}
+
+async function loadHistory() {
+  loadStats();
+  try {
+    const rows = await (await fetch(API + "/history", { headers: hdr() })).json();
+    $("history").querySelector("tbody").innerHTML = rows.map(r =>
+      `<tr><td>#${esc(r.order_id)}</td><td>${esc(r.status.replace("_", " "))}</td><td>${esc(r.ref)}</td><td>${r.amount == null ? "-" : Number(r.amount).toFixed(2)}</td></tr>`).join("");
+  } catch (e) {}
+}
+
+$("addSms").onclick = async () => {
+  const res = await fetch(API + "/ledger/paste", { method: "POST",
+    headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify({ text: $("sms").value }) });
+  if (!res.ok) { alert("No incoming payment found in that text"); return; }
+  const out = await res.json();
+  $("sms").value = ""; loadLedger(); loadHistory(); loadOrders();
+  const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
+  if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.status.replace("_", " ")}`).join("\n"));
+};
+loadLedger(); loadHistory(); loadOrders();
+setInterval(() => { loadOrders(); loadHistory(); loadLedger(); }, 5000);
+</script>
+</body>
+</html>
