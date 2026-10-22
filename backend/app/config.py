@@ -51,3 +51,14 @@ REF_LABELS = [s.strip().lower() for s in os.getenv(
 
 # How many lines either side of the value may still count as "beside it".
 LAYOUT_LABEL_WINDOW = int(os.getenv("CHECKIZ_LAYOUT_LABEL_WINDOW", 1))
+
+# ---- Photo quality (see parser.ocr_confidence) ------------------------------
+# Tesseract's own mean confidence over the words it read, 0-100. Below this the
+# seller is told to retake the photo, because a screen photographed at an angle
+# or under glare loses digits that no rule can recover. It is advice only: it
+# never changes a verdict, and a low number says nothing about whether the
+# payment is real. Both samples in samples/ read about 94 under the Docker
+# Tesseract, and the edited one a fraction higher than the real one, so this
+# floor measures legibility, not tampering. Never measured on a phone photo of a
+# real wallet receipt - task 6 owns that.
+OCR_CONFIDENCE_MIN = float(os.getenv("CHECKIZ_OCR_CONFIDENCE_MIN", 60.0))

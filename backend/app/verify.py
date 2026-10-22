@@ -3,12 +3,12 @@ import time
 
 from . import consistency
 from .db import get_conn, json_field
-from .config import CONFIRM_ABOVE
+from .config import CONFIRM_ABOVE, OCR_CONFIDENCE_MIN
 from .fingerprint import find_exact_repeat, image_sha256
 from .labels import FORENSIC, MISMATCH, label_for
 from .ledger import find_entry, set_consumed
 from .qrstore import find_coded_order_by_amount, get_order, mark_paid
-from .parser import load_image, run_ocr, parse_fields, locate_boxes
+from .parser import load_image, run_ocr, parse_fields, locate_boxes, ocr_confidence
 from .forensics import forensic_report
 
 def get_claim(ref: str):
@@ -20,13 +20,27 @@ def add_claim(ref: str, order_id: str):
         conn.execute("INSERT INTO claims (ref, order_id) VALUES (?, ?)", (ref, order_id))
 
 def result(status, message, fields, forensics, order_id, warning=None, reason=None,
-           signals=(), **extra):
+           signals=(), confidence=None, hint=None, **extra):
     out = {"status": status, "label": label_for(status, reason), "message": message,
            "fields": fields, "forensics": forensics, "order_id": order_id,
-           "signals": list(signals), **extra}
+           "signals": list(signals), "confidence": confidence, **extra}
     if warning:
         out["warning"] = warning
+    if hint:
+        out["hint"] = hint
     return out
+
+def retake_hint(confidence):
+    """Advice about the photo, never about the payment. A low-confidence read is
+    usually an angle, glare or a small screen, and the digits that were lost are
+    recoverable by taking the picture again - not by any rule in this engine.
+    None confidence means the reader had nothing to say about quality, so nothing
+    is advised."""
+    if confidence is None or confidence >= OCR_CONFIDENCE_MIN:
+        return None
+    return (f"Retake for a clearer photo: this one read at {confidence:g}/100. "
+            "Fill the frame with the receipt, hold the screen square to the camera, "
+            "and tilt it away from glare.")
 
 def app_check_warning(entry):
     """SMS sender IDs can be spoofed, so a large payment seen only by SMS (or typed
@@ -55,9 +69,11 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
     # Everything below carries the same alert-free signals: what this receipt says
     # about itself. They are reasons to look, never a status of their own.
     checks = consistency.signals(fields, text)
+    conf = ocr_confidence(data)
+    advice = retake_hint(conf)
 
     def verdict(*args, **kwargs):
-        return result(*args, signals=checks, **kwargs)
+        return result(*args, signals=checks, confidence=conf, hint=advice, **kwargs)
 
     # 1. The very same file was already checked for another order. This runs
     # before the reference gate on purpose: a re-sent screenshot is a repeat

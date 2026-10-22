@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 119 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 141 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -61,18 +61,26 @@ Four checks ask what a receipt says about itself, with no payment alert involved
 
 They appear as `signals` in the verdict response, in the review queue, in the evidence timeline, and as a count on the OBS overlay. The ranges, the accepted age of a receipt, the date spellings and the label words are all environment variables (below) because they belong to the shop and the wallet, not to the code. A time printed without a date is deliberately not checked: `20:05` could be ten minutes ago or last night, and a guess there would produce signals a seller stops reading.
 
+### When the photo, not the receipt, is the problem
+
+Photographing a screen is where OCR is weakest: glare, an angle, a small font. Tesseract scores every word it reads, and Checkiz averages those scores into `confidence` (0-100) on the verdict. Under `CHECKIZ_OCR_CONFIDENCE_MIN` (60) the dashboard adds one line - *"Retake for a clearer photo: this one read at 34/100. Fill the frame with the receipt, hold the screen square to the camera, and tilt it away from glare."* (the 34 is read by a stub in the tests and the demo; no photo of a real receipt was scored that low here) - and **nothing else changes**. The verdict, the signals and the status codes are computed exactly as they would be without it, because a blurred photo of a genuine payment is still a genuine payment.
+
+The number describes one attempt at one photo, so it is not stored - the advice is only useful while the cashier is still holding the phone. Both shipped synthetic samples read at about 94 (table below), and the edited one scored a fraction *higher* than the real one: this measures legibility, never tampering. **No phone photo of a real wallet receipt has been measured**, so 60 is a starting point, not a calibrated threshold.
+
 **What Checkiz cannot do:** prove a receipt is fake from the image alone. A clean, AI-generated receipt can look perfect. Image analysis is a secondary signal. **Confirm large payments in the wallet app.**
 
 ### Measured so far (honest)
 
 On the shipped *synthetic* sample pair (not real receipts), at default thresholds (ELA 8.0, sharpness 6.0), run through real Tesseract in the Docker image:
 
-| Sample | ELA | Sharpness | Verdict | Time |
-|---|---|---|---|---|
-| `real.png` | 5.78 | 4.08 | VERIFIED | 582 ms |
-| `edited.png` | 5.82 | 4.08 | SUSPECTED FAKE | 693 ms |
+| Sample | ELA | Sharpness | Read score | Verdict | Time |
+|---|---|---|---|---|---|
+| `real.png` | 5.78 | 4.08 | 94.5 | VERIFIED | 582 ms |
+| `edited.png` | 5.82 | 4.08 | 94.6 | SUSPECTED FAKE | 693 ms |
 
 **The forensic check did not separate the two.** The edited receipt was caught only because its amount (9250.00) did not match the ledger alert (1250.00). Thresholds need calibration on genuine receipts before any claim about edit detection. `backend/calibrate.py` supports this.
+
+The read-score column is today's run (Tesseract 5.5.0 in the same image, the default confidence floor of 60): neither photo is anywhere near it, and the edited copy scored marginally higher, so confidence says nothing about tampering. That run also read the printed date and time out of real OCR rather than a stub - `Oct 22, 2026` and `10:14 AM` on both samples - though the pages themselves are still the synthetic renders, not a wallet's receipt.
 
 ## What makes it different: order binding
 
@@ -87,7 +95,7 @@ Limits: it only covers orders made through Checkiz's QR page. The wallet may ign
 ## How it works
 
 1. **Alert feed:** the seller's own payment alerts reach the ledger through (a) wallet-app notifications, (b) SMS, or (c) pasted text. Each entry records its source, and sources have different trust (see below).
-2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number, the amount, and the date and time printed on the receipt. The file's hash is compared with earlier checks, then reference format and replay, then the ledger. Alongside the verdict, the receipt is also read against itself (see **Signals, not proof** below).
+2. **Receipt check:** the receipt is uploaded or photographed. OCR extracts the reference number, the amount, and the date and time printed on the receipt. The file's hash is compared with earlier checks, then reference format and replay, then the ledger. Alongside the verdict, the receipt is also read against itself (see **Signals, not proof** below), and the photo is scored for legibility (see **When the photo, not the receipt, is the problem**).
 3. **Settlement:** a ledger match (or an alert that matches an open coded order) settles the order. The order is locked to that payment.
 4. **Review queue:** anything unresolved, suspicious, duplicate, or needing an in-app confirmation is listed for the seller. Receipt images are not stored, only extracted fields and the verdict.
 
@@ -116,6 +124,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration |
 | Dashboard, order board, OBS overlay | Built (basic), no automated tests |
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), untested - needs a real phone |
+| Retake hint when a photo reads poorly (`confidence` and `hint` on the verdict) | Built, tested as advice only - the floor has never been measured on a phone photo ([`backend/app/parser.py`](backend/app/parser.py)) |
 | Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
 | Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
 | Reuse by identical file (SHA-256 of the upload, image never stored) | Built, tested ([`backend/app/fingerprint.py`](backend/app/fingerprint.py)) |
@@ -180,7 +189,7 @@ Tests: `cd backend && pytest` (OCR is stubbed, Tesseract not needed). Docker: `d
 
 A scripted demo on a throwaway database (`backend/demo.py`) is planned and **not in the repo yet**; until it exists, the way to see the logic without a phone is to upload the synthetic samples above. It would use the **synthetic** samples, so it shows the logic, not accuracy on real receipts.
 
-Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8). For the consistency signals: `CHECKIZ_AMOUNT_MIN` (1.00), `CHECKIZ_AMOUNT_MAX` (50000.00), `CHECKIZ_RECEIPT_MAX_AGE_HOURS` (48), `CHECKIZ_TZ_OFFSET_HOURS` (8), `CHECKIZ_DATE_FORMATS`, `CHECKIZ_AMOUNT_LABELS`, `CHECKIZ_REF_LABELS`, `CHECKIZ_LAYOUT_LABEL_WINDOW` (1). The two label lists are what make the layout check follow a wallet's wording instead of assuming one.
+Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECKIZ_CONFIRM_ABOVE` (2000), `CHECKIZ_APP_PACKAGES`, `CHECKIZ_REF_LENGTH` (13), `CHECKIZ_ELA_THRESHOLD`, `CHECKIZ_SHARPNESS_THRESHOLD`, `CHECKIZ_MAX_UPLOAD_MB` (8), `CHECKIZ_OCR_CONFIDENCE_MIN` (60, the floor under which a photo is called retake-worthy). For the consistency signals: `CHECKIZ_AMOUNT_MIN` (1.00), `CHECKIZ_AMOUNT_MAX` (50000.00), `CHECKIZ_RECEIPT_MAX_AGE_HOURS` (48), `CHECKIZ_TZ_OFFSET_HOURS` (8), `CHECKIZ_DATE_FORMATS`, `CHECKIZ_AMOUNT_LABELS`, `CHECKIZ_REF_LABELS`, `CHECKIZ_LAYOUT_LABEL_WINDOW` (1). The two label lists are what make the layout check follow a wallet's wording instead of assuming one.
 
 ### Demo scenarios
 
@@ -192,6 +201,7 @@ Environment variables: `CHECKIZ_API_KEY`, `CHECKIZ_ORDER_TTL_HOURS` (24), `CHECK
 | Genuine receipt | Matches a ledger alert | Verified |
 | Reused receipt | Same reference again | Reused |
 | Receipt that contradicts itself | Amount outside the shop's set range, or a printed time later than this clock | Verdict unchanged, the reason listed under `signals` |
+| Photo that reads poorly | The reader's own mean score falls under the floor (the test reads it at 34/100) | Verdict unchanged, one extra line: retake it |
 
 Each row above is asserted by a test in `backend/tests/`. Demo order note: upload `edited.png` before `real.png`, because the edited copy shares the real receipt's reference number.
 
@@ -201,7 +211,7 @@ Core (the one user, the one job):
 - [x] OCR extraction, reference validation, replay protection, ledger matching
 - [x] Order-bound QR Ph and alert-driven auto-settlement
 - [x] Alert feed with trust levels, review queue, evidence view, packing CSV
-- [x] Camera capture on the main page (`frontend/camera.js`; the "retake for a clearer photo" hint still needs an OCR confidence signal)
+- [x] Camera capture on the main page (`frontend/camera.js`), with the "retake for a clearer photo" hint driven by Tesseract's own confidence (`parser.ocr_confidence`)
 - [x] Verdict labels in the API matching the table above (`label` field, dashboard and overlay)
 - [ ] Buyer pay page so the exact amount is easy to pay
 - [ ] `backend/demo.py` scripted demo on a throwaway database
@@ -209,7 +219,7 @@ Core (the one user, the one job):
 - [ ] ~~Image perceptual hash for reuse~~ measured and rejected - it cannot tell two different receipts apart. Details in `docs/STATUS.md`
 - [x] Consistency checks that do not need alerts (reference format, amount format and range, printed time, layout) - reported as signals beside the verdict; their thresholds are still guesses until real receipts are measured
 - [ ] **Real-device alert test** (`docs/DEVICE_TEST.md`) and fallback: OCR of the seller's own Transactions screen into the ledger
-- [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates
+- [ ] Threshold calibration on genuine and edited receipts, with reported catch and miss rates - including `CHECKIZ_OCR_CONFIDENCE_MIN`, which has never been measured on a phone photo
 - [ ] Interviews with a few real sellers to validate the problem
 - [ ] Optional, gated: AI-assisted reading with an evaluation against standard OCR (last priority)
 

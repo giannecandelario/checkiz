@@ -1,12 +1,12 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23 against `feat/product-hardening`. Suite: **119 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23 against `feat/product-hardening`. Suite: **141 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
 | Feature | Exists | Where | Test coverage |
 |---|---|---|---|
-| Receipt upload, OCR, field extraction | Yes | `backend/app/parser.py` (`run_ocr`, `parse_fields`, `locate_boxes`). `parse_fields` now also returns the printed `date` and `time` as strings; `app/consistency.py` decides what they mean | `test_verify.py::test_parse_fields`, `test_consistency.py::test_the_printed_date_and_time_are_read_into_the_fields` (stubbed OCR); real Tesseract verified once, in Docker, on the synthetic samples only |
+| Receipt upload, OCR, field extraction | Yes | `backend/app/parser.py` (`run_ocr`, `parse_fields`, `locate_boxes`, `ocr_confidence`). `parse_fields` now also returns the printed `date` and `time` as strings; `app/consistency.py` decides what they mean | `test_verify.py::test_parse_fields`, `test_consistency.py::test_the_printed_date_and_time_are_read_into_the_fields` (stubbed OCR); real Tesseract verified in Docker on the synthetic samples only (once end to end, once on 2026-10-23 for the read score and the date/time fields) |
 | Reference format validation | Yes | `backend/app/verify.py`, length from `config.REF_LENGTH` | `test_engine.py::test_missing_reference` |
 | Replay protection (one reference, one order) | Yes | `ledger.consumed_order`, `verify.py` DUPLICATE branch | `test_engine.py::test_verified_then_duplicate`, `test_settle.py::test_one_payment_settles_one_order_only`, `test_real_receipt_cannot_be_reused_on_another_order` |
 | Ledger match, late-alert resolution | Yes | `backend/app/ingest.py`, `verify.py::resolve_pending` | 3 tests in `test_engine.py`, 1 in `test_settle.py` |
@@ -18,7 +18,8 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **119 tests passing*
 | Per-order evidence timeline | Yes | `report.evidence`, `GET /orders/{id}/evidence` | `test_review.py::test_evidence_timeline_keeps_alert_text_out` |
 | ELA + sharpness check | Yes, but **not separating the sample pair** | `backend/app/forensics.py` | Flag behaviour is tested; detection quality is not, and cannot be with synthetic samples |
 | Dashboard, order board, OBS overlay | Yes | `frontend/index.html`, `overlay.html` | None - no UI test harness in the repo |
-| **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html:95` and `qr.html:64` | None; and untestable here because the in-app browser denies camera permission |
+| **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html:97` and `qr.html:64` | None; and untestable here because the in-app browser denies camera permission |
+| Retake hint on a poor photo | Yes | `parser.ocr_confidence` averages Tesseract's per-word scores; `verify.retake_hint` turns a score under `config.OCR_CONFIDENCE_MIN` into `hint` on the verdict, shown in the dashboard banner. `confidence` is on every verdict response; the hint is not stored | `test_confidence.py` (22): the average and each half of its row filter, a blank page as `None`, the floor as config, and four engine tests that pin the status while the hint appears. The **floor** has never been measured on a phone photo - see "Photo quality" |
 | Startup warning when `CHECKIZ_API_KEY` unset | Yes | `main.py:28` | Not asserted by a test |
 | `/health` | Yes | `main.py:48` | Yes, in the API smoke test |
 | Plain-language verdict `label` field | Yes | `backend/app/labels.py`; `label` on every verdict response, late-alert resolution, auto-settlement result, history row, review item and evidence event; `verifications.label` column with migration; `/stats` also returns `by_label`; shown in `index.html` and `overlay.html`. Upload rejections (415/413) are HTTP errors and carry no verdict | `test_labels.py` (19). Status codes are unchanged and still asserted |
@@ -33,7 +34,7 @@ Written 2026-10-23 against `feat/product-hardening`. Suite: **119 tests passing*
 
 ## Corrections made while reconciling
 
-- **Camera capture was under-claimed** as Planned in the README and in the roadmap. It is built and used by two pages. The remaining gap is only the "retake for a clearer photo" hint, which needs an OCR confidence signal the parser does not currently produce.
+- **Camera capture was under-claimed** as Planned in the README and in the roadmap. It is built and used by two pages. The gap it left - the "retake for a clearer photo" hint, which needed an OCR confidence signal the parser did not produce - is now closed: `parser.ocr_confidence` supplies the number and the hint rides on the verdict.
 - **The buyer pay page was over-claimed** as Built. It is Planned until someone builds it; nothing in `main.py` or `frontend/` serves it.
 - **`backend/demo.py` does not exist**, so the README's scripted-demo command would fail on a clean checkout.
 - Two source links in the README could not be verified as written: the Mynt notice is at `newsroom/...` (`news-draft/...` returns 404), and BDO plus one Inquirer link are unreachable from here (connection failure and 403). They are marked as unverified rather than silently kept.
@@ -142,6 +143,47 @@ receipt, and no wallet's real receipt template is in this repo. They are plausib
 defaults until task 5 (real-device alert wording) and task 6 (calibration) replace
 them with measured ones.
 
+## Photo quality: the one number that is allowed to say "retake"
+
+Brief task 4 asked for a "retake for a clearer photo" hint when OCR confidence is
+low. Tesseract already scores every word it returns, so the engine only had to
+average those scores and be honest about what the average means:
+
+- `parser.ocr_confidence` averages only the rows that are both a word and scored.
+  Measured on `samples/real.png` under the Docker Tesseract: 44 rows back, 20 of
+  them structure with no text and `conf` -1. Averaging all 44 gives **51.1**; the
+  words alone give **94.5**. With the unfiltered mean, every clean photo of every
+  real receipt would sit under the floor of 60 and be told to retake. A blank page
+  returns `None`, not 0, for the same reason - no advice is the honest answer about
+  a picture the reader never saw, and it is also why the stubbed OCR in the other
+  test files (boxes with no score column) cannot grow an advice line.
+- The hint is a separate response field (`hint`), never a signal and never a
+  status. `confidence` is on every verdict, the hint only when there is one, and
+  neither is stored: they describe one attempt at one photo, useful only while the
+  cashier still holds the phone. Letting the score change the verdict fails 5 tests
+  (the only ones that read a scored photo), and each half of the row filter above
+  has its own test that fails if it is dropped.
+- Measured with the Docker image's Tesseract 5.5.0 on the two shipped samples
+  (2026-10-23): `real.png` read **94.5** over 24 words (min 85), `edited.png`
+  **94.6** (min 85). Both are far above the floor of 60, and **the edited copy
+  scored a fraction higher than the real one** - which is the point: this number
+  measures legibility, and using it as evidence about authenticity would be a
+  fabrication. The same run extracted `Oct 22, 2026` and `10:14 AM` from real OCR
+  rather than a stub, so the date/time fields added for task 3 now have one
+  non-stub observation behind them, on synthetic pages.
+- Not measured: a phone photo of a wallet screen, in glare, at an angle. The floor
+  of 60 sits below everything this repo has actually observed and is otherwise a
+  guess; task 6 owns replacing it with a measured threshold.
+
+The banner was looked at in the browser against a throwaway `/tmp` database with
+OCR stubbed at 34/100 (2026-10-23, port 8014): the verdict stayed `Reused`, and the
+hint rendered as its own dark box between the message and the signals -
+*"📷 Retake for a clearer photo: this one read at 34/100. Fill the frame with the
+receipt, hold the screen square to the camera, and tilt it away from glare."* The
+screenshot tool was unavailable in the in-app browser this time, so the check was
+the rendered DOM text plus the computed style (`display:block`, `8px 10px` padding,
+`rgba(0,0,0,.22)` on the banner colour), not a picture.
+
 ## What no test covers
 
-The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour, the consistency thresholds against genuine receipts, and anything requiring a wallet's actual alert wording. The 119 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI, the two Termux forwarders, the Docker build, real Tesseract behaviour (the samples have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 141 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.

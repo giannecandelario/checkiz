@@ -44,6 +44,27 @@ def parse_fields(text: str) -> dict:
             "date": d.group(1) if d else None,
             "time": t.group(1).strip() if t else None}
 
+def ocr_confidence(data: dict):
+    """Tesseract's own mean confidence over the words it thinks it read, or None
+    when it read nothing. A photo of a screen at an angle scores low on every
+    token, which is a fact about the photo, not about the payment - so it becomes
+    a "take it again" hint, never a verdict.
+
+    Only rows that are both a word and scored count. On samples/real.png the
+    reader returns 44 rows, 20 of them structure with no text at all; averaging
+    every row gives 51.1 where the words alone give 94.5, and 51 is under the
+    retake floor, so an unfiltered mean would tell a seller to retake every clean
+    photo. An empty page is None rather than 0 for the same reason: no advice is
+    honest advice about a picture the reader never saw."""
+    try:
+        confs = [int(c) for c, word in zip(data["conf"], data["text"])
+                 if int(c) >= 0 and word.strip()]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not confs:
+        return None
+    return round(sum(confs) / len(confs), 1)
+
 def locate_boxes(data: dict, amount, ref, scale: int = 2):
     """Return (x, y, w, h) boxes in original-image coordinates for tokens
     that belong to the amount or the reference number."""
