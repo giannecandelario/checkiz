@@ -40,7 +40,8 @@ function cameraCapture(onFile, opts = {}) {
       `${location.host} over ${location.protocol}. Choosing a photo works the same.`);
 
   const REASON = {
-    NotAllowedError: "Camera permission was refused. Allow it for this site, or choose a photo below.",
+    NotAllowedError: "Camera permission was refused. Allow the camera for this site (a remembered " +
+      "'Block' is cleared at the lock icon in the address bar), or choose a photo below.",
     SecurityError: "The browser blocked the camera for security reasons. Choose a photo below.",
     NotFoundError: "No camera found on this device. Choose a photo below.",
     OverconstrainedError: "No rear camera here. Choose a photo below.",

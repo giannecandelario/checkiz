@@ -38,6 +38,9 @@
 <button id="cam" type="button">Take a photo of the receipt</button>
 <input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
 <p id="conn" hidden style="color:#c62828"></p>
+<p id="ocr" hidden style="color:#b35309"><small><strong>This server cannot read any receipt yet.</strong>
+Tesseract is not installed on it, or not on its PATH, so an upload fails for a reason that has nothing
+to do with the photo. Install tesseract-ocr, or run the Docker image, which already has it.</small></p>
 <div id="banner"></div>
 
 <h2>Needs review <span id="reviewCount"></span></h2>
@@ -54,7 +57,8 @@ confirmed only by a spoofable alert.</small></p>
 <h2>Recent verifications</h2>
 <p id="stats"><small></small></p>
 <table id="history"><thead><tr><th>Order</th><th>Status</th><th>Ref</th><th>Amount</th></tr></thead><tbody></tbody></table>
-<p><small>Streaming? Add <code>overlay.html</code> as an OBS Browser Source.</small></p>
+<p><small>Streaming? Add <a id="overlayLink" href="overlay.html">overlay.html</a> as an OBS Browser
+Source - that address is what OBS needs, and it already points at this server.</small></p>
 
 <h2>Live order board</h2>
 <p><small>Orders made on the QR page settle by themselves when the matching payment alert arrives. No screenshot needed.</small></p>
@@ -259,6 +263,20 @@ $("addSms").onclick = async () => {
   const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
   if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.label || h.status.replace("_", " ")}`).join("\n"));
 };
+// A server with no Tesseract cannot read any receipt, and that is nothing the seller
+// did wrong. Say it at load, before the first upload fails for a reason with no photo
+// in it. Only when the server says so: a Checkiz from before /health had an `ocr`
+// field may well have Tesseract, and this page has no way to know, so it stays quiet
+// and lets the upload answer for it.
+async function checkServer() {
+  try {
+    const h = await (await fetch(API + "/health")).json();
+    $("ocr").hidden = !("ocr" in h) || !!h.ocr;
+  } catch (e) { /* the tables already report a server that is not there */ }
+}
+$("overlayLink").textContent = location.protocol.startsWith("http")
+  ? location.origin + "/overlay.html" : "overlay.html";
+checkServer();
 loadLedger(); loadHistory(); loadOrders(); loadReview();
 setInterval(() => { loadOrders(); loadHistory(); loadLedger(); loadReview(); }, 5000);
 </script>

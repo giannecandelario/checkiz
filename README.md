@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 141 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 170 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -115,7 +115,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 
 | Feature | Status |
 |---|---|
-| Receipt upload and OCR extraction, reference validation | Built, tested |
+| Receipt upload and OCR extraction, reference validation | Built, tested (OCR stubbed in tests; real Tesseract observed in Docker) |
 | Replay protection (a reference is locked to one order) | Built, tested |
 | Ledger match, late-alert resolution of pending receipts | Built, tested |
 | Order-bound QR Ph generator, auto-settlement from alerts | Built, tested; wallet behaviour with the order reference untested |
@@ -126,6 +126,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | One origin for the pages and the API, with a stated reason when a request fails | Built. Serving tested in `tests/test_serving.py`; the page-side helper was executed against a stubbed browser, not clicked through |
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), its failure paths executed against a stubbed camera - still needs a real phone |
 | Retake hint when a photo reads poorly (`confidence` and `hint` on the verdict) | Built, tested as advice only - the floor has never been measured on a phone photo ([`backend/app/parser.py`](backend/app/parser.py)) |
+| Server states whether it can read receipts at all (`/health` `ocr`, dashboard banner, 503 instead of a crash) | Built, tested ([`backend/tests/test_no_ocr.py`](backend/tests/test_no_ocr.py)) |
 | Buyer pay page (`/pay/{order_id}`, `frontend/pay.html`) | **Planned, not built** |
 | Plain-language verdict labels in the API, dashboard and overlay | Built, tested |
 | Reuse by identical file (SHA-256 of the upload, image never stored) | Built, tested ([`backend/app/fingerprint.py`](backend/app/fingerprint.py)) |
@@ -183,6 +184,8 @@ uvicorn app.main:app --reload
 ```
 
 Open **http://localhost:8000/**. The pages and the API share that one origin, so no page has to be told where the other half lives.
+
+If step 1 was skipped, the server says so twice instead of failing silently: `/health` answers `{"ocr": null}`, the dashboard opens with "This server cannot read any receipt yet", and an upload answers **503** naming Tesseract rather than a 500 stack trace. No verdict is written for it, because nothing was read.
 
 - **From a phone on the same network:** run `uvicorn app.main:app --host 0.0.0.0 --port 8000` and open `http://<lan-ip>:8000/`. The in-page camera only works over https or localhost, so on a plain LAN address the photo buttons fall back to the phone's own camera - the reason is shown on screen when that happens.
 - **If another project is already on 8000:** start Checkiz on a free port and open that. A page pointed at something that is not Checkiz now says what answered it instead of reporting "could not reach the server".

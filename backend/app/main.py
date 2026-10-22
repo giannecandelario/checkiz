@@ -10,12 +10,14 @@ from fastapi.staticfiles import StaticFiles
 import cv2
 import numpy as np
 import qrcode
+from pytesseract import TesseractNotFoundError
 from pydantic import BaseModel
 
 from .db import init_db
 from .config import APP_PACKAGES
 from .ingest import ingest_alert
 from .ledger import parse_alert, list_entries
+from .parser import ocr_engine
 from . import qrph, qrstore
 from .report import evidence, packing_csv
 from .review import acknowledge, review_list
@@ -49,6 +51,9 @@ def startup():
     if not os.getenv("CHECKIZ_API_KEY"):
         print("WARNING: CHECKIZ_API_KEY is not set. Anyone who can reach this server can "
               "post fake payment alerts. Set it before using real money.")
+    if ocr_engine() is None:
+        print("WARNING: Tesseract is not installed or not on PATH, so no receipt can be read. "
+              "Install tesseract-ocr or use the Docker image; /verify answers 503 until then.")
     if FRONTEND:
         print(f"Dashboard pages served from {FRONTEND} - open them at whatever address "
               "this server was started on, e.g. http://localhost:8000/")
@@ -75,18 +80,33 @@ class NotificationIn(BaseModel):
 def health():
     """`name` lets a page tell Checkiz from whatever else happens to be listening
     on the port it was pointed at - the failure mode where another project's
-    server answers with HTML and the dashboard says only 'could not reach'."""
-    return {"ok": True, "name": "checkiz", "ui": bool(FRONTEND)}
+    server answers with HTML and the dashboard says only 'could not reach'.
+
+    `ocr` is the Tesseract version the process can actually run, or null. Without
+    it a receipt cannot be read at all, and that is a fact about the server the
+    seller needs before the first upload, not a verdict about the image."""
+    return {"ok": True, "name": "checkiz", "ui": bool(FRONTEND), "ocr": ocr_engine()}
 
 @app.post("/verify")
 async def verify(file: UploadFile = File(...), order_id: str = Form(...)):
+    if not order_id.strip():
+        raise HTTPException(422, "Order ID is required - a receipt is settled against an order")
     if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(415, "Upload an image file")
     limit = int(float(os.getenv("CHECKIZ_MAX_UPLOAD_MB", 8)) * 1024 * 1024)
     data = await file.read(limit + 1)
     if len(data) > limit:
         raise HTTPException(413, "Image too large")
-    return verify_receipt(data, order_id)
+    try:
+        return verify_receipt(data, order_id)
+    except TesseractNotFoundError:
+        # Checked where it actually fails, not up front: a stubbed reader is a
+        # perfectly good way to test the verdict rules on a machine with no OCR
+        # installed. Nothing about the photo was judged here, and no verdict is
+        # written, so this is an HTTP answer about the server.
+        raise HTTPException(503, "This server cannot read any receipt: Tesseract is not "
+                                 "installed or not on its PATH. Install tesseract-ocr, or run "
+                                 "the Docker image. Nothing about this photo was checked.")
 
 @app.post("/ledger/sms", dependencies=[Depends(require_key)])
 def ledger_sms(body: SMSIn):

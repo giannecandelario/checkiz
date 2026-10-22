@@ -22,6 +22,25 @@ def load_image(data: bytes):
     arr = np.frombuffer(data, np.uint8)
     return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
+_UNPROBED = object()
+_ocr_engine = _UNPROBED
+
+def ocr_engine():
+    """The Tesseract version this process can run, or None when it cannot run one.
+    Probed once because the answer costs a subprocess, and cached for the life of
+    the process.
+
+    A missing engine is a fact about the server, never about a receipt: it is why
+    the dashboard says so before the first upload rather than after an upload
+    comes back "Internal Server Error" with nothing to act on."""
+    global _ocr_engine
+    if _ocr_engine is _UNPROBED:
+        try:
+            _ocr_engine = str(pytesseract.get_tesseract_version())
+        except Exception:
+            _ocr_engine = None
+    return _ocr_engine
+
 def run_ocr(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)

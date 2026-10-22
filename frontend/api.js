@@ -11,9 +11,10 @@ const CHECKIZ_API = (() => {
   return "http://localhost:8000";
 })();
 
-// Says what actually went wrong, in the order a seller can act on it. `res` is a
-// Response when something answered wrongly; `err` is the exception when nothing
-// answered at all.
+// Says what actually went wrong, and only what the response itself proves. `res` is
+// a Response when something answered wrongly; `err` is the exception when nothing
+// answered at all. Who is answering is checkizWho()'s job: Checkiz's own crash comes
+// back as text/plain too, and this page used to call that "another server".
 function checkizProblem(res, err) {
   if (err) return `Nothing answered at ${CHECKIZ_API} (${err.message || err}). ` +
     `Start the server, or name it with ?api=http://its-address:8000.`;
@@ -24,32 +25,46 @@ function checkizProblem(res, err) {
       `CHECKIZ_API_KEY - type it in the key box above.`;
   if (!isData)
     return `${CHECKIZ_API} answered HTTP ${res.status} with ${type || "no content type"} ` +
-      `instead of Checkiz's JSON. Something else is listening on that port - another dev ` +
-      `server is the usual reason. Run Checkiz on a free port and point this page at it.`;
+      `instead of the JSON a Checkiz request returns.`;
   return `${CHECKIZ_API} returned HTTP ${res.status}.`;
 }
 
 // The only kind of failure the "the server is down" banner is for: the port is
-// answering with something that is not Checkiz, or not answering at all. A parsed
-// 400 from Checkiz itself is an answer, not an outage, and must not overwrite the
-// connection warning.
+// answering with something that is not Checkiz-shaped, or not answering at all. A
+// parsed 400 from Checkiz itself is an answer, not an outage, and must not
+// overwrite the connection warning.
 function checkizIsUnreachable(res, err) {
   if (err) return true;
   const type = (res.headers.get("content-type") || "").split(";")[0];
   return !(type.includes("json") || type.includes("csv"));
 }
 
-// Asks the server what it is. Only call this when a normal request already
-// failed: it is a diagnosis, not a health check the seller has to read.
+// Asks the server what it is. Only call this when a normal request already failed:
+// it is a diagnosis, not a health check the seller has to read. This is where the
+// "wrong port" conclusion belongs, because /health is what proves it.
 async function checkizWho() {
   try {
     const res = await fetch(CHECKIZ_API + "/health");
     const body = await res.json().catch(() => null);
-    if (body && body.name === "checkiz")
-      return body.ui ? `${CHECKIZ_API} is Checkiz, with the pages served from it.`
-                     : `${CHECKIZ_API} is Checkiz, but it cannot find frontend/ - set CHECKIZ_FRONTEND.`;
-    return `${CHECKIZ_API} answered /health without saying it is Checkiz` +
-      (body && body.status ? ` (it says "${body.status}")` : "") + `.`;
+    if (body && body.name === "checkiz") {
+      const where = body.ui ? `${CHECKIZ_API} is Checkiz, with the pages served from it`
+                            : `${CHECKIZ_API} is Checkiz, but it cannot find frontend/ - set CHECKIZ_FRONTEND`;
+      return body.ocr ? `${where}.`
+        : `${where}, and it has no OCR engine: Tesseract is not installed on that machine, ` +
+          `so no receipt can be read until it is (the Docker image has it).`;
+    }
+    // The dashboard branch added `name`. Until then /health answered {"ok": true},
+    // which is what main still returns, so a real Checkiz running one branch behind
+    // used to be reported as some other program squatting on the port.
+    if (body && body.ok === true)
+      return `${CHECKIZ_API} answered /health as {"ok": true} - that is Checkiz on a branch ` +
+        `from before /health named itself, so it does not serve these pages and may not have ` +
+        `Tesseract. Restart it from the branch that has them, or point this page at that ` +
+        `server with ?api=`;
+    return `${CHECKIZ_API} is not Checkiz` +
+      (body && body.status ? ` (its /health says "${body.status}")` : "") +
+      `. Another program holding that port is the usual reason - run Checkiz on a free ` +
+      `port and point this page at it with ?api=`;
   } catch (e) {
     return `Nothing answered at ${CHECKIZ_API}/health (${e.message || e}).`;
   }
