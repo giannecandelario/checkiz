@@ -5,9 +5,11 @@ what the tests, the history rows and the API contract use. These labels are the
 words a seller reads, derived from the status plus which check produced it,
 because one status (`SUSPECTED_FAKE`) covers three different seller messages.
 
-`LIKELY_EDITED` is only ever used when the image check flagged the receipt and
-nothing in the ledger confirmed it. That signal is uncalibrated, so the wording
-stays a prompt to look, never a statement about the buyer.
+`LIKELY_EDITED` is no longer issued: since 2026-10-23 an uncalibrated image score is
+a `warning` on the verdict rather than a `SUSPECTED_FAKE` of its own, so nothing in
+`verify.py` passes the `forensic` reason any more. The mapping stays because rows
+written before that change carry the word in `verifications.label`, and a seller
+opening an older database should read what the machine said at the time.
 """
 from typing import Optional
 

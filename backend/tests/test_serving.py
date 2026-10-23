@@ -121,6 +121,19 @@ def test_the_api_key_box_is_wired_to_remember_and_reload():
         "the overlay has no box to fill - it takes ?key= in the OBS URL"
 
 
+def test_the_dashboard_shows_the_forensic_warning_where_a_seller_reads_it():
+    """"Likely edited" stopped being a verdict on 2026-10-23, so the warning line is
+    the only place a flagged receipt says it was flagged. The banner shows it, but a
+    seller working through the stream hours later reads the review queue and the
+    evidence record - so both have to carry it, escaped like every other stored
+    string."""
+    idx = (Path(main.FRONTEND) / "index.html").read_text()
+    review = idx[idx.index("async function loadReview("):idx.index('$("review").addEventListener')]
+    evidence = idx[idx.index("async function showEvidence("):idx.index('$("packing").onclick')]
+    assert "${esc(r.warning)}" in review, "the queue cannot drop the flag it exists to raise"
+    assert "${esc(t.warning)}" in evidence, "a dispute is argued from this record"
+
+
 # ---- the database file location --------------------------------------------
 
 def test_the_database_path_can_be_pointed_at_another_file(tmp_path, monkeypatch):

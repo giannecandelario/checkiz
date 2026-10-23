@@ -196,6 +196,25 @@ def test_a_label_one_line_away_still_counts():
     assert layout_reasons(text, {"ref": REF, "amount": 1250.0}) == []
 
 
+def test_a_blank_line_from_the_reader_is_not_a_neighbour():
+    """Tesseract puts an empty line between rows of a screen, which pushed the
+    label outside the +/-1 window. Measured on the repo's own receipts through
+    real Tesseract: samples/real.png and a photographed copy of it both raised
+    "no reference label beside it" and "no amount label beside it", so the
+    layout check contradicted the template this repo generates its samples from.
+    """
+    text = f"Amount\n\nPHP 1,250.00\n\nReference No.\n\n{REF}"
+    assert layout_reasons(text, {"ref": REF, "amount": 1250.0}) == []
+
+
+def test_a_value_with_no_label_near_it_still_signals_across_blank_lines():
+    """The fix must not become a pass-everything rule: two blank lines and a
+    line of unrelated text still say the value sits on an unlabelled row."""
+    text = f"Payment received\n\n\n{REF} this number means nothing here\n\nPHP 500.00 total"
+    r = layout_reasons(text, {"ref": REF})
+    assert r == [f"Reference {REF} was read from a line with no reference label beside it"]
+
+
 def test_a_value_that_is_not_in_the_text_says_nothing_about_layout():
     assert layout_reasons(f"Amount PHP 500.00 Ref No. {REF}", {"ref": "1111111111111"}) == []
 

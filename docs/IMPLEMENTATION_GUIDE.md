@@ -308,6 +308,8 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
                   fields, forensics, order_id)
 ```
 
+**Rule 4 above is the MVP as first built, and the shipped engine no longer works that way.** A forensic flag on its own now returns `PENDING_MATCH` with the flag as a `warning` and still goes on the pending list, because nothing has calibrated the score against a genuine receipt - a photographed genuine page measures *lower* than the unsaved file. See `BLUEPRINT.md` section 7 for the current rule order and `app/verify.py` for the code.
+
 ## 7. API (`app/main.py`)
 
 ```python

@@ -154,11 +154,14 @@ def test_a_bad_photo_of_an_unmatched_receipt_does_not_become_fake(png, monkeypat
 
 def test_the_score_never_replaces_a_forensic_flag(png, monkeypatch):
     """The image check and the reader's confidence are two different doubts about
-    the same picture; neither is allowed to become the other."""
+    the same picture; neither is allowed to become the other. Since 2026-10-23
+    neither of them becomes a verdict either: the photo advice and the flag both
+    come back as words, and the status stays "Can't confirm yet"."""
     stub_reader(monkeypatch, conf=[30] * 5, flagged=True)
     r = verify.verify_receipt(other_png(3), "604")
-    assert r["status"] == "SUSPECTED_FAKE" and r["label"] == "Likely edited"
+    assert r["status"] == "PENDING_MATCH" and r["label"] == "Can't confirm yet"
     assert "Retake" in r["hint"] and r["confidence"] == 30.0
+    assert "forensic" in r["warning"].lower() and r["forensics"]["flagged"] is True
 
 
 def test_signals_and_the_hint_stay_two_separate_things(png, monkeypatch):

@@ -5,7 +5,7 @@ from . import consistency
 from .db import get_conn, json_field
 from .config import CONFIRM_ABOVE, OCR_CONFIDENCE_MIN
 from .fingerprint import find_exact_repeat, image_sha256
-from .labels import FORENSIC, MISMATCH, label_for
+from .labels import MISMATCH, label_for
 from .ledger import find_entry, set_consumed
 from .qrstore import find_coded_order_by_amount, get_order, mark_paid
 from .parser import load_image, run_ocr, parse_fields, locate_boxes, ocr_confidence
@@ -123,19 +123,20 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
                        f"Amount mismatch: receipt {amount:.2f}, ledger {entry['amount']:.2f}",
                        fields, forensics, order_id, reason=MISMATCH)
 
-    # Policy: a ledger match (ref + amount) is the strongest signal, so it is
-    # never overridden by the probabilistic image check. The flag is returned
-    # as a warning instead (see docs/BLUEPRINT.md, section 7).
     warnings = []
-    if forensics["flagged"]:
-        warnings.append("Image forensics flagged the amount/reference fields; "
-                        "ledger match takes priority. Review manually if unsure.")
     other = find_coded_order_by_amount(amount) if amount is not None else None
     if other and other["order_id"] != order_id and issued is None:
         warnings.append(f"This amount was issued in the QR for Order #{other['order_id']}.")
 
     # 5. Verified (ledger match)
     if entry:
+        # Policy: a ledger match (ref + amount) is the strongest signal, so it is
+        # never overridden by the probabilistic image check. The flag is returned
+        # as a warning instead (see docs/BLUEPRINT.md, section 7). Said only here,
+        # because past this point there is no match that could take priority.
+        if forensics["flagged"]:
+            warnings.append("Image forensics flagged the amount/reference fields; "
+                            "ledger match takes priority. Review manually if unsure.")
         chk = app_check_warning(entry)
         if chk:
             warnings.append(chk)
@@ -146,13 +147,20 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
                        f"Ref {ref} matched incoming payment of {entry['amount']:.2f}",
                        fields, forensics, order_id, warning,
                        trust=entry["source"], needs_app_check=bool(chk))
-    warning = " ".join(warnings) or None
 
-    # 6. Forensic flag with no ledger confirmation
+    # 6. The image score, on its own, is not evidence that a receipt is false.
+    #    Nothing has calibrated it against a genuine receipt - docs/CALIBRATION.md
+    #    measured 5.78 real against 5.82 edited on the only pair in this repo, and
+    #    a photographed copy of a genuine page scored *lower* (2.55) than the
+    #    unsaved one, because the camera noise raises the whole-image baseline this
+    #    ratio is divided by. So the flag is said out loud and the receipt waits
+    #    for an alert like any other unread page. It stays a verdict only when the
+    #    ledger or the order's coded amount contradicts the receipt, above.
     if forensics["flagged"]:
-        return verdict("SUSPECTED_FAKE",
-                       "Image shows signs of editing on the amount or reference fields",
-                       fields, forensics, order_id, reason=FORENSIC)
+        warnings.append(f"Image forensics flagged the amount/reference fields "
+                        f"(ELA {forensics['ela']}, sharpness {forensics['sharpness']}). "
+                        "That score is uncalibrated and nothing here contradicts this "
+                        "receipt, so it is not a verdict - confirm it in the wallet app.")
 
     # 7. Pending: remember it so a late SMS can resolve it automatically
     with get_conn() as conn:
@@ -160,7 +168,7 @@ def _verify(image_bytes: bytes, order_id: str, sha: str) -> dict:
                      (ref, order_id, amount))
     return verdict("PENDING_MATCH",
                    "Receipt looks valid but no matching payment in the ledger yet",
-                   fields, forensics, order_id)
+                   fields, forensics, order_id, " ".join(warnings) or None)
 
 
 def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
@@ -174,23 +182,30 @@ def verify_receipt(image_bytes: bytes, order_id: str) -> dict:
     f = res.get("fields") or {}
     log_verdict(order_id, res["status"], res["message"], f.get("amount"), f.get("ref"),
                 res["elapsed_ms"], res.get("needs_app_check"), res["label"], sha,
-                res["signals"], {k: f.get(k) for k in ("date", "time") if f.get(k)})
+                res["signals"], {k: f.get(k) for k in ("date", "time") if f.get(k)},
+                warning=res.get("warning"))
     return res
 
 def log_verdict(order_id, status, message, amount, ref, elapsed_ms=None, needs_app_check=False,
-                label=None, sha256=None, signals=None, printed_at=None):
+                label=None, sha256=None, signals=None, printed_at=None, warning=None):
     """`signals` and `printed_at` are stored as they were read: a receipt whose
     own date said nothing, or that contradicted itself, has to look the same way
-    when the seller reads the evidence record days later."""
+    when the seller reads the evidence record days later.
+
+    `warning` is kept for the same reason. Since 2026-10-23 the image score is a
+    warning rather than a verdict, and the review board is where a seller reads
+    the queue hours after the stream - a flag that only lived in the HTTP
+    response would be gone by then."""
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO verifications (order_id, status, message, amount, ref, elapsed_ms, "
-            "needs_app_check, label, sha256, signals, printed_at) VALUES "
-            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "needs_app_check, label, sha256, signals, printed_at, warning) VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (order_id, status, message, amount, ref, elapsed_ms, int(bool(needs_app_check)),
              label or label_for(status), sha256,
              json.dumps(signals) if signals else None,
-             json.dumps(printed_at) if printed_at else None),
+             json.dumps(printed_at) if printed_at else None,
+             warning),
         )
 
 def get_stats():

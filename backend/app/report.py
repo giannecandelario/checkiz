@@ -47,7 +47,7 @@ def evidence(order_id: str) -> dict:
         order = conn.execute("SELECT * FROM qr_orders WHERE order_id = ?", (order_id,)).fetchone()
         verdicts = [dict(r) for r in conn.execute(
             """SELECT id, status, label, message, amount, ref, needs_app_check, elapsed_ms,
-                      sha256, signals, printed_at, created_at
+                      sha256, signals, printed_at, warning, created_at
                FROM verifications WHERE order_id = ? ORDER BY id""", (order_id,))]
         for v in verdicts:
             v["label"] = v["label"] or label_for(v["status"])
@@ -68,16 +68,17 @@ def evidence(order_id: str) -> dict:
                 "label": v["label"], "detail": v["message"], "ref": v["ref"],
                 "amount": v["amount"], "sha256": v["sha256"],
                 "signals": v["signals"], "printed_at": v["printed_at"],
+                "warning": v["warning"],
                 "needs_app_check": bool(v["needs_app_check"])} for v in verdicts]
               + [{"at": p["received_at"], "kind": "payment_alert", "status": "RECEIVED",
                   "detail": f"{p['amount']:.2f} seen by {p['source'] or 'unknown'}"
                             + (f" from {p['sender']}" if p["sender"] else ""),
-                  "ref": p["ref"], "amount": p["amount"],
+                  "ref": p["ref"], "amount": p["amount"], "warning": None,
                   "needs_app_check": p["source"] != "app" and p["amount"] >= CONFIRM_ABOVE}
                  for p in payments]
               + [{"at": c["claimed_at"], "kind": "claim", "status": "CLAIMED",
                   "detail": f"Receipt {c['ref']} claimed for this order", "ref": c["ref"],
-                  "amount": None, "needs_app_check": False} for c in claims])
+                  "amount": None, "warning": None, "needs_app_check": False} for c in claims])
     return {
         "order_id": order_id,
         "issued": None if not order else {

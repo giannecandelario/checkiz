@@ -145,8 +145,13 @@ def layout_reasons(text, fields):
     alone cannot say where a number came from."""
     if not text:
         return []
-    label_lines = [line.lower() for line in text.splitlines()]
-    digits_per_line = [re.sub(r"[^0-9]", "", line) for line in label_lines]
+    # Only rows with something on them count as a neighbour. Tesseract separates
+    # the rows of a screen with blank lines, and a blank inside the window pushed
+    # the label out of reach - which made this repo's own sample receipts read as
+    # if nothing labelled their amount or reference.
+    rows = [line for line in text.splitlines() if line.strip()]
+    label_lines = [line.lower() for line in rows]
+    digits_per_line = [re.sub(r"[^0-9]", "", line) for line in rows]
     f = fields or {}
     pairs = []
     if f.get("ref"):

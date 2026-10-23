@@ -14,6 +14,39 @@ threshold only appears when the two groups actually separate with enough samples
 them. **If your run says the groups overlap, that is the result - write it down and stop.
 It is a finding, not a failed task.**
 
+### Measured 2026-10-23: a phone photo moves ELA *down*
+
+Four synthetic files, run through the Docker Tesseract against an empty ledger (the
+numbers are in the README's "A genuine receipt, a week old, photographed"):
+
+| Copy | ELA | Flagged at 8.0? |
+|---|---|---|
+| rendered receipt, saved straight from the generator | 5.78 | no |
+| the same page photographed on a phone (angle, moiré, glare, noise, JPEG q62) | 2.55 | no |
+| amount redrawn, saved straight | 5.76 | no |
+| amount redrawn, photographed | 2.42 | no |
+
+Photographing a genuine receipt cut its score in half, and the edited copy followed the
+same curve. `ela_ratio` is the recompression error inside the field boxes divided by the
+error across the whole image, and camera noise raises that whole-image baseline - so the
+denominator, not the edit, decides where a photographed page lands.
+
+Two consequences for whoever runs this for real:
+
+- **Do not expect the phone-photo group to sit above the clean-screenshot group.** The
+  genuine folder needs both forms of the same page, and the comparison that matters is
+  genuine-photographed against edited-photographed. A run that only compares clean
+  screenshots against each other measures the wrong thing and looks like it worked.
+- **Compare like with like when you propose a threshold.** A number that separates two
+  groups of unsaved screenshots is not a threshold for the photos a counter actually
+  receives. If you record a threshold, record which form it was measured on.
+
+Since 2026-10-23 a flag on its own no longer calls a receipt fake - it is a `warning`
+line and the receipt waits as `Can't confirm yet` - so the false-alarm cost in section 4
+is now a seller reading one extra line, not a customer argument about an accusation.
+That makes a *lower* threshold cheaper to live with; it does not make an unmeasured one
+correct.
+
 ## 1. What to collect
 
 Two folders. At least **five of each** - fewer than three per group and the script

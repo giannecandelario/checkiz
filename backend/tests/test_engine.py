@@ -52,9 +52,64 @@ def test_ledger_match_wins_over_forensic_flag(monkeypatch, png):
     r = verify.verify_receipt(png, "106")
     assert r["status"] == "VERIFIED" and r["warning"]
 
-def test_forensic_flag_without_ledger_is_suspected(monkeypatch, png):
+def test_the_image_score_alone_does_not_call_a_receipt_fake(monkeypatch, png):
+    """Rewritten 2026-10-23 (was: test_forensic_flag_without_ledger_is_suspected).
+
+    The old expectation let an uncalibrated score be the only evidence against a
+    receipt. The measurement in docs/CALIBRATION.md is 5.78 genuine vs 5.82
+    edited on the only pair in this repo, and a photographed copy of a genuine
+    receipt scored *lower* than the unsaved page (ELA 2.55 vs 5.78) - so this
+    number cannot tell a phone photo from a forgery, and a seller's real
+    week-old receipt was called fake by it. The flag is still reported, and the
+    receipt still waits for an alert."""
     stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {REF}", flagged=True)
-    assert verify.verify_receipt(png, "107")["status"] == "SUSPECTED_FAKE"
+    r = verify.verify_receipt(png, "107")
+    assert r["status"] == "PENDING_MATCH" and r["label"] == "Can't confirm yet"
+    assert r["forensics"]["flagged"] is True
+    assert "forensic" in r["warning"].lower()
+
+
+def test_a_flagged_receipt_is_still_resolved_by_a_late_alert(monkeypatch, png):
+    """The flagged path used to return before the pending insert, so a genuine
+    receipt the score disliked was never settled when its alert arrived - the
+    seller had to re-upload it by hand."""
+    from app.verify import resolve_pending
+    stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {REF}", flagged=True)
+    verify.verify_receipt(png, "107b")
+    assert [p["ref"] for p in verify.list_pending()] == [REF]
+    add_entry({"ref": REF, "amount": 1250.0, "sender": None, "raw": "t"})
+    assert resolve_pending(REF)["status"] == "VERIFIED"
+
+
+def test_the_warning_is_kept_with_the_verdict(monkeypatch, png):
+    """The review board is where a seller works through a stream hours later. If
+    the flag only lived in the HTTP response, moving it out of the verdict would
+    have made it invisible exactly where it is needed."""
+    stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {REF}", flagged=True)
+    verify.verify_receipt(png, "107c")
+    row = verify.list_history(1)[0]
+    assert "forensic" in row["warning"].lower()
+    assert row["status"] == "PENDING_MATCH"
+
+
+def test_a_warning_never_claims_a_ledger_match_that_did_not_happen(monkeypatch, png):
+    """The flagged-pending path has no entry to match against, so telling the
+    seller "ledger match takes priority" there would invent the strongest
+    evidence the receipt could have."""
+    stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {REF}", flagged=True)
+    r = verify.verify_receipt(png, "107d")
+    assert r["status"] == "PENDING_MATCH"
+    assert "ledger match" not in r["warning"]
+
+
+def test_a_ledger_match_still_outranks_the_image_flag(monkeypatch, png):
+    """Keeping the old policy honest: when the alert really did arrive, the
+    warning says the match outranked the flag."""
+    add_entry({"ref": REF, "amount": 500.0, "sender": None, "raw": "t"})
+    stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}", flagged=True)
+    r = verify.verify_receipt(png, "107e")
+    assert r["status"] == "VERIFIED"
+    assert "ledger match takes priority" in r["warning"]
 
 def test_history_records_verdicts(monkeypatch, png):
     stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}")

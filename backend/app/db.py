@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS verifications (
     sha256 TEXT,
     signals TEXT,
     printed_at TEXT,
+    warning TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS review_ack (
@@ -95,6 +96,9 @@ def init_db():
             ("verifications", "sha256", "TEXT"),
             ("verifications", "signals", "TEXT"),
             ("verifications", "printed_at", "TEXT"),
+            # What the seller is told to look at that is not the verdict: since
+            # 2026-10-23 the image score lives here instead of in the status.
+            ("verifications", "warning", "TEXT"),
             ("ledger", "source", "TEXT DEFAULT 'sms'"),
             ("ledger", "consumed_order", "TEXT"),
             # The time the wallet printed on the row, when it was read off a

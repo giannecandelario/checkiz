@@ -1,6 +1,6 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite: **197 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23, last reconciled against `feat/scan-accuracy`. Suite: **207 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
@@ -18,13 +18,13 @@ Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite
 | Review queue, acknowledge + reopen | Yes | `backend/app/review.py`, `GET /review`, `POST /review/{id}` | 8 tests in `test_review.py` |
 | Packing list CSV, formula-injection neutralised | Yes | `backend/app/report.py`, `GET /orders/packing.csv` | `test_review.py::test_packing_csv_*` (2) |
 | Per-order evidence timeline | Yes | `report.evidence`, `GET /orders/{id}/evidence` | `test_review.py::test_evidence_timeline_keeps_alert_text_out` |
-| ELA + sharpness check | Yes, but **not separating the sample pair** | `backend/app/forensics.py` | Flag behaviour is tested; detection quality is not, and cannot be with synthetic samples |
+| ELA + sharpness check | Yes, but **not separating the sample pair**, and **since 2026-10-23 it cannot verdict on its own** | `backend/app/forensics.py`; the flag becomes a `warning` on the verdict (`verifications.warning`, + migration) shown in the banner, the review queue and the evidence timeline, and the receipt goes to `PENDING_MATCH` so a late alert settles it | Flag behaviour, the warning's three surfaces and the pending path are tested; detection quality is not, and cannot be with synthetic samples - see "A real receipt came back flagged" |
 | Dashboard, order board, OBS overlay | Yes | `frontend/index.html`, `overlay.html`, served by the API itself | No UI harness; but `test_serving.py` proves every page and helper is actually served and that all three load `api.js`. Panel rendering is still only looked at by hand |
 | **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html` and `qr.html` | 25 assertions executed in Node against a stubbed window: every refusal reason, the 0x0 startup race, live QR, and the no-`BarcodeDetector` path - three guards then mutated to confirm each one is load-bearing. **No real phone yet**, and the in-app browser here cannot grant camera permission at all |
-| Pages served from the API origin | Yes | `main.py` `frontend_dir()` and the `StaticFiles` mount at `main.py:325`, mounted after every route | `test_serving.py` (17): root, three pages, two helpers, an API route beating the catch-all, `/health` reporting `ui`, and that the pages actually call `checkizKey` |
+| Pages served from the API origin | Yes | `main.py` `frontend_dir()` and the `StaticFiles` mount at `main.py:325`, mounted after every route | `test_serving.py` (18): root, three pages, two helpers, an API route beating the catch-all, `/health` reporting `ui`, and that the pages actually call `checkizKey` |
 | The API key is remembered for the tab and reloads the page | Yes | `api.js:checkizKey()` (`sessionStorage`, not `localStorage`), wired in `index.html` before its first request and in `qr.html` before `loadSeller()`; the overlay is untouched because it takes `?key=` | 17 assertions executed in Node against a stubbed DOM (restore, never overwrite what is typed, save, remove when cleared, one debounced reload per burst of keystrokes, survives blocked storage, no-ops with no box) plus the two page wirings; six mutations, each breaking its own assertion. One of them (`test_serving.py::test_the_api_key_box_is_wired_to_remember_and_reload`) is in the repo so a page cannot quietly stop using the helper. Then re-run in a real browser - see "The key box that remembered nothing" |
 | One rule for where the API is, and a real reason when a request fails | Yes | `frontend/api.js` - `CHECKIZ_API` (`?api=` > own origin > `localhost:8000`), `checkizProblem`, `checkizIsUnreachable`, `checkizWho`, `checkizDownload` | 50 assertions executed in Node against the file as it stands, with a stubbed `location`/`fetch`/`document`/`URL`, plus the dashboard's own `checkServer()` run the same way. Mutating away the same-origin rule, the foreign-server branch, the late revoke and the `"ocr" in h` guard each breaks its own assertion. The harness is not in the repo, so re-checking it means a browser or someone checking it in as a real UI test |
-| `CHECKIZ_DB_PATH`, so two instances do not share one file | Yes | `db.py:_db_path()` | 4 of the 17 in `test_serving.py` (override, relative and `~` forms, the default, and that the pointed-at file is the one created) |
+| `CHECKIZ_DB_PATH`, so two instances do not share one file | Yes | `db.py:_db_path()` | 4 of the 18 in `test_serving.py` (override, relative and `~` forms, the default, and that the pointed-at file is the one created) |
 | **The server says when it cannot read receipts at all** | Yes | `parser.ocr_engine()` (one cached probe), `/health`'s `ocr`, a startup warning, `HTTP 503` on `/verify`, and a banner on the dashboard before the first upload | `test_no_ocr.py` (13): the probe's three answers and its caching, `/health` with and without an engine, the 503 carrying no verdict and writing no history row, the 422 for a blank order, the test that a **stubbed** reader still gets verdicts on a machine with no Tesseract, and two that the dashboard only warns when the server actually reports `ocr: null`. Reproduced live on :8000, then fixed, then reproduced as 503 - see "A server that could not read anything" |
 | Retake hint on a poor photo | Yes | `parser.ocr_confidence` averages Tesseract's per-word scores; `verify.retake_hint` turns a score under `config.OCR_CONFIDENCE_MIN` into `hint` on the verdict, shown in the dashboard banner. `confidence` is on every verdict response; the hint is not stored | `test_confidence.py` (22): the average and each half of its row filter, a blank page as `None`, the floor as config, and four engine tests that pin the status while the hint appears. The **floor** has never been measured on a phone photo - see "Photo quality" |
 | Startup warnings when `CHECKIZ_API_KEY` is unset or no Tesseract is installed | Yes | `main.py:49` | The API-key warning is not asserted by a test. The Tesseract one is only reached through `ocr_engine()`, which is tested; the printed line itself was observed in the server log, not asserted |
@@ -36,7 +36,7 @@ Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite
 | Scripted demo (`backend/demo.py`) | **No** | - | README's "Getting started" references a file that does not exist |
 | Exact-file reuse check (SHA-256 of the upload) | Yes | `backend/app/fingerprint.py`, `verifications.sha256` + index, runs before the reference gate in `verify.py` | `test_fingerprint.py` (7), incl. the limits pinned below |
 | Image perceptual hash (dHash) | **No - measured and rejected** | - | See "Perceptual hash: the measurement" below |
-| Alert-free consistency checks | Yes, as **signals only** | `backend/app/consistency.py` (4 pure checks), collected in `verify._verify`, returned as `signals` on every verdict, stored in `verifications.signals` (+ `printed_at`), shown in the dashboard banner, review queue, evidence timeline and as a count on the overlay. Every threshold is a config value | `test_consistency.py` (50): each check on its own, then the same verdict with and without a signal, storage, and the legacy-row path. **No real receipt has been through them** - see "Signals: what was decided and why" |
+| Alert-free consistency checks | Yes, as **signals only** | `backend/app/consistency.py` (4 pure checks), collected in `verify._verify`, returned as `signals` on every verdict, stored in `verifications.signals` (+ `printed_at`), shown in the dashboard banner, review queue, evidence timeline and as a count on the overlay. Every threshold is a config value. The layout check ignores blank rows, because Tesseract puts one between every line of a screen | `test_consistency.py` (52): each check on its own, then the same verdict with and without a signal, storage, the legacy-row path, and two for the blank-row fix. **No real receipt has been through them** - see "Signals: what was decided and why" |
 | AI-assisted reader, `eval/run_eval.py`, `docs/AI_EVAL.md` | **No** | - | Brief task 7, gated and last priority |
 | Staff mode, PINs, `/reconcile/daily` | **No** | - | Explicitly Deferred in the brief |
 
@@ -224,6 +224,105 @@ receipt, and no wallet's real receipt template is in this repo. They are plausib
 defaults until task 5 (real-device alert wording) and task 6 (calibration) replace
 them with measured ones.
 
+## A real receipt came back flagged
+
+Reported 2026-10-23 by the owner: a genuine receipt, about a week old, was called
+edited or fake. Their image is not in this repo and will not be committed, so the
+score that fired on it is unknown. What could be established was measured here.
+
+**The age was not the cause.** A receipt stamped 162 hours ago raises one signal -
+*"Receipt shows Oct 16, 2026 19:05, about 162 hours old - this shop treats 48 hours
+as current"* - and the verdict stayed `Can't confirm yet`. `RECEIPT_MAX_AGE_HOURS`
+feeds a signal and nothing else; no age can produce a fake call. That was checked
+against a container running the code from before this change, so it is the answer
+the owner's own upload would have got on the age alone.
+
+**Only one path could have said "Likely edited"**, and it was the uncalibrated one:
+rule 6 turned a forensic flag into `SUSPECTED_FAKE` with no ledger entry involved.
+Reproduced with four synthetic files (a rendered receipt for PHP 480.00 stamped a
+week back with a reference no ledger had seen, a copy with the amount redrawn as
+PHP 4,880.00, and a phone-photo simulation of each), posted to two containers built
+from the same commit - one before the change, one after - each with an empty ledger:
+
+| File | ELA | Sharpness | Read score | Signals before | Verdict before, at threshold 2.0 | Verdict now, at threshold 2.0 |
+|---|---|---|---|---|---|---|
+| genuine, unsaved | 5.78 | 3.37 | 94.7 | age + layout ×2 | `SUSPECTED_FAKE` "Likely edited" | `PENDING_MATCH` + warning |
+| genuine, photographed | 2.55 | 3.71 | 93.0 | age + layout ×2 | `SUSPECTED_FAKE` "Likely edited" | `PENDING_MATCH` + warning |
+| amount redrawn, unsaved | 5.76 | 3.37 | 94.0 | age + layout ×2 | `SUSPECTED_FAKE` "Likely edited" | `PENDING_MATCH` + warning |
+| amount redrawn, photographed | 2.42 | 3.71 | 93.2 | age + layout ×2 | `SUSPECTED_FAKE` "Likely edited" | `PENDING_MATCH` + warning |
+
+At the shipped thresholds (ELA 8.0) none of the four is flagged, so both builds
+answered `Can't confirm yet` and the columns above are identical; the threshold was
+lowered with `CHECKIZ_ELA_THRESHOLD=2.0` only to put a file on the flag path at all.
+That is a demonstration of the rule, not a proposed threshold.
+
+Three things came out of it:
+
+- **A photograph of a genuine page scores *lower* than the unsaved file** (5.78 →
+  2.55), the opposite direction to a forgery. The score is a ratio against the
+  whole image's recompression error, and camera noise lifts that baseline. Recorded
+  in [CALIBRATION.md](CALIBRATION.md), because it changes what a real run has to
+  collect: the phone-photo group cannot be expected to sit above the clean group.
+- **The layout check contradicted this repo's own template.** It reported "no
+  reference label beside it" and "no amount label beside it" on pages generated by
+  `backend/make_samples.py`, which prints both labels beside both values. Tesseract
+  returns a blank line between every row of a screen, and a blank inside the
+  one-row window pushed the label out of reach. Fixed by ignoring rows with nothing
+  on them (`consistency.layout_reasons`); the age signal is real and stays.
+- **The flag is now a warning, stored and shown.** `verifications.warning` (+
+  migration), on the verdict response, in the review queue and in the evidence
+  timeline, and the receipt still goes on the pending list - so the alert turning up
+  later settles it. Live on the same container: the genuine page re-saved (ELA 6.03,
+  flagged at threshold 2.0) answered `Can't confirm yet` with the warning, then
+  `POST /ledger/sms` with the matching alert returned `VERIFIED`, and the earlier
+  row kept its warning in `/orders/610/evidence`.
+
+The rule order in `verify.py` after the change: SHA-256 repeat → no reference →
+already claimed → the order's coded amount contradicts the receipt → ledger
+consumed/amount checks → **ledger match wins and the flag is a warning** → otherwise
+`PENDING_MATCH`, flag as a warning if there is one. "Likely edited" has no producer
+now; `labels.py` keeps the mapping so a database written before the change reads
+back what it said at the time, and `/stats` still lists the bucket at zero.
+
+Seven mutations, each one break in a copy of `backend/` plus `frontend/` (the copy
+needs both, because `test_serving.py` reads the shipped pages):
+
+| # | Break | Tests that fail |
+|---|---|---|
+| M0 | nothing - baseline copy | 0 (207 pass) |
+| M1 | blank OCR rows count as neighbours again | 1 |
+| M2 | the layout window stops looking at neighbouring rows | 7 |
+| M3 | the flag goes unsaid when nothing contradicts it | 7 |
+| M4 | the flag verdicts again and skips the pending list | 10 |
+| M5 | the warning is dropped on the way into the database | 3 |
+| M6 | the column is never added to an older database | 1 |
+| M7 | the pending warning claims a ledger match again | 1 |
+
+M6 passed on the first run of this table - nothing in the suite opened a database
+from before the column, so the migration line was untested. `test_review.py::
+test_a_database_written_before_the_warning_column_is_still_read` now drops the
+column, inserts a row and reads both surfaces, and M6 fails as it should.
+
+**M7 exists because M3 found a defect I had just written.** Moving the flag out of
+the verdict made the flagged receipt fall through to the pending path, and the
+pre-existing warning *"ledger match takes priority"* was appended for every flagged
+receipt *before* the ledger was consulted - so a receipt that matched nothing told
+the seller a match had outranked the flag. The append now lives inside the
+`if entry:` branch, and `test_a_warning_never_claims_a_ledger_match_that_did_not_happen`
+holds it there. Found by the mutation run, not by reading the diff.
+
+Still unknown: whether the shipped thresholds are right for a real wallet screenshot
+(needs task 6 on genuine receipts), and whether the owner's own image would have
+been flagged at all after this change - their file was never put through either
+build.
+
+One surface deliberately left alone: `frontend/overlay.html` shows the verdict, its
+message and a count of signals, and it does not show the warning. A stream viewer
+therefore sees "Can't confirm yet" without the flag line under it. The seller's own
+dashboard, review queue and evidence record all carry it, which is where a dispute is
+argued from; widening the overlay is a layout call for whoever next looks at it on
+air.
+
 ## Photo quality: the one number that is allowed to say "retake"
 
 Brief task 4 asked for a "retake for a clearer photo" hint when OCR confidence is
@@ -404,7 +503,7 @@ the sample's own wording, which is the calibration gap in "Signals" above, not a
 
 ## What no test covers
 
-The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples and one synthetic transactions screen have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 197 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples and one synthetic transactions screen have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 207 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
 
 Three things this round added and still does not cover:
 

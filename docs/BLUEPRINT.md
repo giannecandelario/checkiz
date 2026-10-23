@@ -121,11 +121,11 @@ Evaluated in order; the first matching rule wins.
 | 1 | Reference number missing or not 13 digits | SUSPECTED_FAKE |
 | 2 | Reference already in `claims` | DUPLICATE |
 | 3 | Reference in ledger but amount differs | SUSPECTED_FAKE |
-| 4 | Forensic score above threshold | SUSPECTED_FAKE |
+| 4 | Forensic score above threshold | **No verdict of its own** - a `warning`, since 2026-10-23 |
 | 5 | Reference and amount match ledger | VERIFIED (write to `claims`) |
 | 6 | Otherwise | PENDING_MATCH |
 
-Rule 4 runs after the ledger amount check so that a ledger match is never overridden silently by a noisy image heuristic. The implemented policy: when the reference and amount match the ledger, `VERIFIED` wins and the forensic flag is returned as a `warning` on the response instead of changing the verdict. A forensic flag with no ledger confirmation is `SUSPECTED_FAKE` (rule 5).
+Rule 4 sits after the ledger amount check so that a ledger match is never overridden silently by a noisy image heuristic. The implemented policy has two halves: when the reference and amount match the ledger, `VERIFIED` wins and the forensic flag is returned as a `warning` on the response instead of changing the verdict; and when nothing matches, the flag is still only a `warning` - the receipt becomes `PENDING_MATCH`, goes on the pending list, and a late alert settles it. It was `SUSPECTED_FAKE` there until 2026-10-23, when a measurement showed the score moving the wrong way on a photographed genuine page (see [CALIBRATION.md](CALIBRATION.md)); nothing has calibrated it, so it cannot be the only evidence against a receipt. The warning is stored with the verdict row (`verifications.warning`) so the review queue and the evidence record still show it hours later.
 
 A `VERIFIED` verdict whose only evidence is a spoofable alert source (SMS or pasted text) at or above `CHECKIZ_CONFIRM_ABOVE` also carries `needs_app_check`, which is persisted on the verdict row so the reconciliation review list can surface it later.
 
@@ -161,17 +161,27 @@ Known limits: screenshots are re-compressed by Messenger/Viber, which weakens EL
 
 Every endpoint except `/health` and `/verify` is locked when `CHECKIZ_API_KEY` is set.
 
-`/verify` response:
+`/verify` response, as returned (a `PENDING_MATCH` on a receipt stamped a week before an empty ledger, real Tesseract, 2026-10-23):
 
 ```json
 {
-  "status": "VERIFIED",
-  "message": "Ref 1002849130490 matched incoming payment of 1250.00",
-  "fields": {"amount": 1250.0, "ref": "1002849130490"},
-  "forensic_score": 1.1,
-  "order_id": "104"
+  "status": "PENDING_MATCH",
+  "label": "Can't confirm yet",
+  "message": "Receipt looks valid but no matching payment in the ledger yet",
+  "fields": {"amount": 480.0, "ref": "3007412889011", "date": "Oct 16, 2026", "time": "19:05"},
+  "forensics": {"ela": 6.03, "sharpness": 3.36, "flagged": false},
+  "order_id": "611",
+  "signals": ["Receipt shows Oct 16, 2026 19:05, about 162 hours old - this shop treats 48 hours as current"],
+  "confidence": 94.9,
+  "elapsed_ms": 1017,
+  "sha256": "e8e1bc7e776d6d812a900507161f8aec67a3201ba4d99470ddb19f69d0a8ec73"
 }
 ```
+
+Four more keys appear only when they have something to say: `warning` (the forensic flag
+when it did not change the verdict, or a spoofable-source caution), `hint` (the retake
+advice under `CHECKIZ_OCR_CONFIDENCE_MIN`), and on a `VERIFIED` match `needs_app_check`
+with `trust` naming the alert source that produced it.
 
 ## 10. Privacy and Security
 

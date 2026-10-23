@@ -193,6 +193,7 @@ async function loadReview() {
   $("review").querySelector("tbody").innerHTML = rows.map(r =>
     `<tr><td>#${esc(r.order_id)}</td><td><span class="badge ${esc(r.reason)}">${esc(r.label || LABEL[r.reason] || r.reason)}</span></td>` +
     `<td>${esc(r.detail)}${r.amount == null ? "" : ` <small>(${Number(r.amount).toFixed(2)})</small>`}` +
+    (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
     (r.signals?.length ? `<small>&#9432; ${r.signals.map(esc).join(" · ")}</small>` : "") + `</td>` +
     `<td><button type="button" class="why" data-o="${esc(r.order_id)}">why</button> ` +
     `<button type="button" class="ok" data-o="${esc(r.order_id)}">reviewed</button></td></tr>`).join("")
@@ -219,6 +220,7 @@ async function showEvidence(order) {
       `<li><small>${esc(t.at)} UTC</small> ` +
       (t.kind === "verdict" ? `<span class="badge ${esc(t.status)}">${esc(t.label || t.status.replace("_", " "))}</span>`
                             : `<em>${esc(t.kind)}</em>`) + ` ${esc(t.detail)}` +
+      (t.warning ? `<small>&#9888; ${esc(t.warning)}</small>` : "") +
       (t.signals?.length ? `<small>&#9432; ${t.signals.map(esc).join(" · ")}</small>` : "") +
       `</li>`).join("");
     box.hidden = false;

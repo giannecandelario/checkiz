@@ -85,10 +85,14 @@ def test_wrong_order_amount_is_labelled_does_not_match(monkeypatch, png):
     assert "150.37" in r["message"]
 
 
-def test_forensic_flag_without_a_ledger_match_is_likely_edited(monkeypatch, png):
+def test_forensic_flag_without_a_ledger_match_is_no_longer_called_likely_edited(monkeypatch, png):
+    """Rewritten 2026-10-23 with the policy in verify.py: the score alone does not
+    accuse. "Likely edited" stays a label the API can answer, because rows written
+    before this change carry it, and `label_for` keeps mapping it."""
     stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {REF}", flagged=True)
     r = verify.verify_receipt(png, "406")
-    assert r["status"] == "SUSPECTED_FAKE" and r["label"] == "Likely edited"
+    assert r["status"] == "PENDING_MATCH" and r["label"] == "Can't confirm yet"
+    assert "forensic" in r["warning"].lower()
 
 
 def test_ledger_match_outranks_the_forensic_flag(monkeypatch, png):
@@ -191,12 +195,16 @@ def test_stats_count_by_label_as_well_as_by_status(monkeypatch):
     add_entry({"ref": REF, "amount": 1250.0, "sender": None, "raw": "t"})
     stub_ocr(monkeypatch, f"PHP 9,250.00 Ref No. {REF}")
     verify.verify_receipt(other_png(3), "420")
-    other = "1002849130491"  # no ledger entry, so the flag has nothing to override it
+    other = "1002849130491"  # no ledger entry, so the flag has nothing to say about it
     stub_ocr(monkeypatch, f"PHP 1,250.00 Ref No. {other}", flagged=True)
     verify.verify_receipt(other_png(4), "421")
     s = verify.get_stats()
-    assert s["by_status"]["SUSPECTED_FAKE"] == 2
-    assert s["by_label"] == {"Doesn't match": 1, "Likely edited": 1}
+    # Since 2026-10-23 the flagged row is "Can't confirm yet", not "Likely edited".
+    # Two statuses and two labels still come back separately, which is what this
+    # test is for; the label that no longer has a producer is still asserted on
+    # the mapping above, because history rows written before the change carry it.
+    assert s["by_status"] == {"SUSPECTED_FAKE": 1, "PENDING_MATCH": 1}
+    assert s["by_label"] == {"Doesn't match": 1, "Can't confirm yet": 1}
 
 
 def test_status_codes_are_untouched_by_the_label_field(monkeypatch, png):

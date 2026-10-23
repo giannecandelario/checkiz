@@ -37,9 +37,41 @@ def reasons():
     return {r["order_id"]: r["reason"] for r in review_list()}
 
 def test_flagged_image_without_a_ledger_match_is_queued(monkeypatch, png):
+    """Still on the list after the 2026-10-23 policy change - as a receipt that
+    cannot be confirmed, which is what it actually is, rather than as a fake."""
     stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}", flagged=True)
     verify.verify_receipt(png, "501")
-    assert reasons() == {"501": "SUSPECTED_FAKE"}
+    assert reasons() == {"501": "PENDING_MATCH"}
+
+def test_the_review_row_carries_the_forensic_warning(monkeypatch, png):
+    """The verdict no longer says "Likely edited", so the queue has to say it
+    instead - otherwise the flag is dropped on the floor where a seller reading
+    the list hours later cannot see it."""
+    stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}", flagged=True)
+    verify.verify_receipt(png, "501b")
+    row = [r for r in review_list() if r["order_id"] == "501b"][0]
+    assert "forensic" in row["warning"].lower()
+
+def test_the_evidence_record_keeps_the_warning(monkeypatch, png):
+    stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}", flagged=True)
+    verify.verify_receipt(png, "501c")
+    verdicts = [e for e in evidence("501c")["timeline"] if e["kind"] == "verdict"]
+    assert "forensic" in verdicts[0]["warning"].lower()
+
+def test_a_database_written_before_the_warning_column_is_still_read():
+    """The local .db a hackathon judge leaves behind has no warning column. The
+    queue and the evidence record SELECT it by name, so without the migration in
+    init_db() they would crash on startup for exactly the databases someone is
+    most likely to hand over."""
+    with db.get_conn() as conn:
+        conn.execute("ALTER TABLE verifications DROP COLUMN warning")
+        conn.execute("INSERT INTO verifications (order_id, status, message) "
+                     "VALUES ('501d', 'PENDING_MATCH', 'old row')")
+    db.init_db()
+    row = [r for r in review_list() if r["order_id"] == "501d"][0]
+    assert row["warning"] is None
+    verdicts = [e for e in evidence("501d")["timeline"] if e["kind"] == "verdict"]
+    assert verdicts[0]["warning"] is None
 
 def test_clean_receipt_with_no_payment_is_queued_as_pending(monkeypatch, png):
     stub_ocr(monkeypatch, f"PHP 500.00 Ref No. {REF}")

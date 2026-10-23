@@ -17,7 +17,7 @@ def review_list():
     with get_conn() as conn:
         verdicts = [dict(r) for r in conn.execute(
             f"""SELECT v.id, v.order_id, v.status, v.label, v.message, v.amount, v.ref,
-                       v.created_at, v.needs_app_check, v.signals
+                       v.created_at, v.needs_app_check, v.signals, v.warning
                 FROM verifications v
                 WHERE (v.status IN {_UNRESOLVED} OR v.needs_app_check = 1)
                   AND v.id = (SELECT MAX(id) FROM verifications WHERE order_id = v.order_id)
@@ -39,11 +39,12 @@ def review_list():
         out[str(v["order_id"])] = {"order_id": v["order_id"], "reason": reason, "label": label,
                                    "detail": v["message"], "amount": v["amount"],
                                    "ref": v["ref"], "seen_at": v["created_at"],
+                                   "warning": v["warning"],
                                    "signals": json_field(v["signals"], [])}
     for o in unpaid:
         out.setdefault(str(o["order_id"]), {
             "order_id": o["order_id"], "reason": "UNPAID_EXPIRED", "amount": o["amount"],
-            "ref": None, "seen_at": o["created_at"], "signals": [],
+            "ref": None, "seen_at": o["created_at"], "signals": [], "warning": None,
             "detail": f"QR issued for {o['amount']:.2f}, no matching payment within "
                       f"{ORDER_TTL_HOURS:g} hours"})
     return sorted(out.values(), key=lambda i: i["seen_at"] or "", reverse=True)

@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 197 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, and no table in it has been filled. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 207 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, and no table in it has been filled. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -41,10 +41,12 @@ Sources (link status checked 2026-10-23):
 | **Verified** | The receipt's reference and amount match a payment alert on the seller's own ledger | Strongest signal. Only as trustworthy as the alert feed |
 | **Reused** | This reference number, or this exact image file, was already checked for another order | Reliable for repeats of a reference number or of the identical file. A copy re-compressed by a messenger app has different bytes and is caught only by the reference |
 | **Doesn't match** | The amount differs from the alert, or from the amount issued for this order | Reliable when a ledger entry exists |
-| **Likely edited** | Image signals suggest tampering | **Weak. See below** |
 | **Can't confirm yet** | Nothing contradicts the receipt and nothing confirms it either: no matching payment has arrived, or the image could not be read | Honest default. Wait for the alert, check the wallet app, or retake the photo |
+| **⚠ Image flagged** (a warning line on the verdict, not a verdict) | The image score on the amount/reference fields is above threshold while nothing in the ledger or the order contradicts the receipt | **Weak, and deliberately not a call.** The receipt is treated as "Can't confirm yet" with this line attached |
 
 The API returns both a machine status (`VERIFIED`, `DUPLICATE`, `SUSPECTED_FAKE`, `PENDING_MATCH`) and the plain `label` above. The codes did not change; the label is derived from the code plus which check produced it, because `SUSPECTED_FAKE` covers three different things a seller should do next. A receipt that cannot be read is labelled "Can't confirm yet", not "Likely edited" - nothing was contradicted. The dashboard, overlay, review queue and evidence view show the labels. Mapping: [`backend/app/labels.py`](backend/app/labels.py), tests in `backend/tests/test_labels.py`.
+
+**"Likely edited" stopped being issued on 2026-10-23.** Nothing has ever calibrated that score against a genuine receipt, and the measurements in the next two sections show why a guess was unsafe: on the only pair in this repo the real page scored 5.78 against the edited one's 5.82, and a photographed copy of the *genuine* page scored **lower** than the unsaved original (2.55 against 5.78), because camera noise raises the whole-image baseline the ratio is divided by. So an uncalibrated score can no longer be the only evidence against a receipt - it is said out loud as a `warning`, the receipt waits on the review queue like any other unread page, and a late alert still settles it. The label remains in `labels.py` so a database written before the change reads back what it said at the time.
 
 ### Signals, not proof
 
@@ -91,6 +93,26 @@ The same pair measured through `calibrate.py` itself, which is the shape a real 
 
 The "not flagged" column is the bold sentence above, in the script's own words: at the shipped thresholds neither image is flagged, so the edited copy is invisible to the forensics. `--at 5.8 4.09` on these two files does flag the edited one, and the script refuses to turn that into a recommended threshold, because n = 1 per group is not a measurement.
 
+### A genuine receipt, a week old, photographed
+
+Run 2026-10-23 after a seller reported that a real receipt of theirs came back flagged. Four synthetic files, none of them a wallet's receipt: a rendered receipt for PHP 480.00 stamped `Oct 16, 2026 19:05` with a reference no ledger had ever seen, a copy with the amount redrawn as PHP 4,880.00, and a phone-photo simulation of each (angle, screen moiré, glare, noise, a JPEG re-compression at quality 62). Each was posted to two containers built from the same commit, both with an empty ledger, one from the code before this change and one after.
+
+| File | ELA | Sharpness | Read score | Signals raised | Verdict before | Verdict now |
+|---|---|---|---|---|---|---|
+| genuine, unsaved | 5.78 | 3.37 | 94.7 | age, layout ×2 | Can't confirm yet | Can't confirm yet, age only |
+| genuine, photographed | 2.55 | 3.71 | 93.0 | age, layout ×2 | Can't confirm yet | Can't confirm yet, age only |
+| amount redrawn, unsaved | 5.76 | 3.37 | 94.0 | age, layout ×2 | Can't confirm yet | Can't confirm yet, age only |
+| amount redrawn, photographed | 2.42 | 3.71 | 93.2 | age, layout ×2 | Can't confirm yet | Can't confirm yet, age only |
+
+Two findings, both from the same four files:
+
+- **The layout check contradicted this repo's own template.** It flagged the reference *and* the amount on every one of the four, on a page generated from `backend/make_samples.py` with `Reference No.` and `Amount` printed beside both values. Cause: Tesseract emits blank lines between the rows of a screen, and a blank inside the one-row window pushed the label out of reach. Fixed in [`backend/app/consistency.py`](backend/app/consistency.py) by ignoring rows with nothing on them; the age signal is genuine and stays.
+- **Photographing a genuine receipt lowered its ELA** (5.78 → 2.55), the opposite direction to a forgery. The score is a ratio against the whole image's recompression error, and camera noise raises that whole-image baseline. This is the strongest reason in this repo so far not to let the score verdict on its own.
+
+At the shipped thresholds none of the four was flagged, so the two columns above agree. To see the flag path at all the ELA threshold was lowered to 2.0 with `CHECKIZ_ELA_THRESHOLD` - the same four files then read `SUSPECTED FAKE / "Likely edited"` on the old code and `Can't confirm yet` with a `warning` on the new one, including on the genuine page. That override is a demonstration of the rule, not a calibration: 2.0 is not a proposed threshold for anything.
+
+A flagged receipt still waits on the pending list, so the alert turning up later settles it: the same genuine page re-saved (ELA 6.03 at threshold 2.0, so flagged) answered `Can't confirm yet` with the warning, then `POST /ledger/sms` with the matching alert returned `VERIFIED` and the warning stayed on the earlier row of the evidence timeline.
+
 ## What makes it different: order binding
 
 The obvious question is "is this receipt real?". Checkiz also asks "was this payment made for *this order*?"
@@ -132,7 +154,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Alert feed: notification, SMS, paste and transactions-screenshot endpoints with trust levels | Built, tested; phone forwarders untested on a device |
 | Transactions-screenshot fallback (`POST /ledger/history-screenshot`, reads a list row by row) | Built, tested with stubbed OCR ([`backend/tests/test_history.py`](backend/tests/test_history.py)); run once through real Tesseract on a **synthetic** rendered Transactions screen ([`docs/STATUS.md`](docs/STATUS.md) "The fallback, run for real"). Never run against a real wallet screenshot |
 | Review queue, evidence view, packing list CSV | Built, tested |
-| Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration. `backend/calibrate.py` prints a measured table and refuses to suggest a threshold on too few samples ([`docs/CALIBRATION.md`](docs/CALIBRATION.md)) |
+| Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration. Since 2026-10-23 a flag alone is a `warning` on the verdict, never a verdict, and it is stored with the row so the review queue and evidence view still show it. `backend/calibrate.py` prints a measured table and refuses to suggest a threshold on too few samples ([`docs/CALIBRATION.md`](docs/CALIBRATION.md)) |
 | Dashboard, order board, OBS overlay | Built (basic). Served by the API itself; the panels have no automated tests |
 | One origin for the pages and the API, with a stated reason when a request fails | Built. Serving tested in `tests/test_serving.py`; the page-side helper was executed against a stubbed browser, not clicked through |
 | API key box remembered for the browser tab, and page reloads when it is filled (`checkizKey()` in `frontend/api.js`) | Built, tested ([`backend/tests/test_serving.py`](backend/tests/test_serving.py) checks the wiring in the shipped source; the behaviour was executed against a stubbed DOM and clicked through once in Chrome on a synthetic key). Uses `sessionStorage`, so closing the tab forgets it |
