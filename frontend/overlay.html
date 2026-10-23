@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checkiz Overlay</title>
+<!-- OBS: add as a Browser Source (e.g. 700x160). Optional: ?api=http://localhost:8000&key=SECRET -->
+<style>
+  body { margin: 0; background: transparent; font-family: system-ui, sans-serif; }
+  #card { display: none; margin: 12px; padding: 14px 18px; border-radius: 12px; color: #fff;
+          font-size: 22px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  #card small { display: block; font-size: 15px; opacity: .9; margin-top: 4px; }
+  .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
+  .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
+</style>
+</head>
+<body>
+<div id="card"></div>
+<script>
+const q = new URLSearchParams(location.search);
+const API = q.get("api") || "http://localhost:8000", KEY = q.get("key");
+let lastId = null;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function poll() {
+  try {
+    const res = await fetch(API + "/history?limit=1", { headers: KEY ? { "X-API-Key": KEY } : {} });
+    const [r] = await res.json();
+    if (r && r.id !== lastId) {
+      lastId = r.id;
+      const card = document.getElementById("card");
+      card.className = r.status; card.style.display = "block";
+      card.innerHTML = `Order #${esc(r.order_id)}: <strong>${esc(r.status.replace("_", " "))}</strong>` +
+        `<small>${esc(r.message)}</small>`;
+    }
+  } catch (e) {}
+}
+poll(); setInterval(poll, 2000);
+</script>
+</body>
+</html>
