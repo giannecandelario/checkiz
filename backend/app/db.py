@@ -47,6 +47,12 @@ CREATE TABLE IF NOT EXISTS verifications (
     elapsed_ms INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS receipt_fingerprints (
+    ref TEXT PRIMARY KEY,
+    phash TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 def get_conn():

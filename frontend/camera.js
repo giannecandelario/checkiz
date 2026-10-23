@@ -1,50 +1,122 @@
-// Shared camera helper.
-// cameraCapture(onFile, { live: onPayload }):
-//  - opens the rear camera with a Capture button and passes the photo to onFile(File)
-//  - if the browser has BarcodeDetector and `live` is given, QR codes are detected
-//    continuously and passed to live(rawText) (the camera then closes)
-//  - falls back to the phone's native camera via <input capture> when getUserMedia
-//    is unavailable (it needs https or localhost) or permission is denied.
-function cameraCapture(onFile, opts = {}) {
+function cameraCapture(onFile, options = {}) {
   const fallback = () => {
-    const i = document.createElement("input");
-    i.type = "file"; i.accept = "image/*"; i.setAttribute("capture", "environment");
-    i.onchange = () => i.files[0] && onFile(i.files[0]);
-    i.click();
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment");
+    input.addEventListener("change", () => {
+      if (input.files[0]) onFile(input.files[0]);
+    }, { once: true });
+    input.click();
   };
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback();
 
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false })
-    .then(stream => {
-      const box = document.createElement("div");
-      box.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;" +
-        "align-items:center;justify-content:center;gap:12px;z-index:99;color:#fff;font-family:system-ui,sans-serif";
-      const video = document.createElement("video");
-      video.autoplay = true; video.playsInline = true; video.muted = true; video.srcObject = stream;
-      video.style.cssText = "max-width:92vw;max-height:68vh;border-radius:10px";
-      const hint = document.createElement("div");
-      hint.textContent = opts.live && "BarcodeDetector" in window ? "Point at the QR code..." : "Frame it, then tap Capture";
-      const row = document.createElement("div");
-      const btn = (t, fn) => { const b = document.createElement("button"); b.textContent = t; b.onclick = fn;
-        b.style.cssText = "padding:10px 18px;margin:0 6px;font-size:16px;border-radius:8px;border:0;cursor:pointer"; return b; };
-      let timer = null;
-      const close = () => { clearInterval(timer); stream.getTracks().forEach(t => t.stop()); box.remove(); };
-      row.append(
-        btn("Capture", () => {
-          const c = document.createElement("canvas");
-          c.width = video.videoWidth; c.height = video.videoHeight;
-          c.getContext("2d").drawImage(video, 0, 0);
-          c.toBlob(b => { close(); onFile(new File([b], "capture.jpg", { type: "image/jpeg" })); }, "image/jpeg", 0.92);
-        }),
-        btn("Cancel", close));
-      box.append(video, hint, row); document.body.append(box);
+  if (!navigator.mediaDevices?.getUserMedia) {
+    fallback();
+    return;
+  }
 
-      if (opts.live && "BarcodeDetector" in window) {
-        const det = new BarcodeDetector({ formats: ["qr_code"] });
-        timer = setInterval(async () => {
-          try { const f = await det.detect(video); if (f.length) { close(); opts.live(f[0].rawValue); } } catch (e) {}
-        }, 300);
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" } },
+    audio: false
+  }).then(stream => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "camera-dialog-backdrop";
+    const dialog = document.createElement("section");
+    dialog.className = "camera-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-label", options.title || "Use your camera");
+
+    const heading = document.createElement("h2");
+    heading.textContent = options.title || "Take a photo";
+    const video = document.createElement("video");
+    video.autoplay = true;
+    video.playsInline = true;
+    video.muted = true;
+    video.srcObject = stream;
+
+    const hint = document.createElement("p");
+    hint.className = "camera-error";
+    hint.textContent = options.live && "BarcodeDetector" in window
+      ? "Point your camera at the QR code, or capture a photo."
+      : "Frame the receipt or QR clearly, then capture.";
+
+    const actions = document.createElement("div");
+    actions.className = "camera-dialog-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "button button-secondary";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const capture = document.createElement("button");
+    capture.className = "button button-primary";
+    capture.type = "button";
+    capture.textContent = "Capture";
+    actions.append(cancel, capture);
+    dialog.append(heading, video, hint, actions);
+    backdrop.append(dialog);
+    document.body.append(backdrop);
+
+    let timer = null;
+    let isClosed = false;
+    function onKeyDown(event) {
+      if (event.key === "Escape" && !isClosed) close();
+    }
+    const close = () => {
+      if (isClosed) return;
+      isClosed = true;
+      window.clearInterval(timer);
+      document.removeEventListener("keydown", onKeyDown);
+      stream.getTracks().forEach(track => track.stop());
+      backdrop.remove();
+    };
+    cancel.addEventListener("click", close);
+    backdrop.addEventListener("click", event => {
+      if (event.target === backdrop) close();
+    });
+    document.addEventListener("keydown", onKeyDown);
+    capture.addEventListener("click", () => {
+      if (!video.videoWidth || !video.videoHeight) {
+        hint.textContent = "Camera is still starting. Wait a moment, then capture.";
+        return;
       }
-    })
-    .catch(fallback);
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        hint.textContent = "Could not capture from this camera. Try uploading an image instead.";
+        return;
+      }
+      context.drawImage(video, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          hint.textContent = "Could not capture this image. Try again or upload a file.";
+          return;
+        }
+        close();
+        onFile(new File([blob], "camera-capture.jpg", { type: "image/jpeg" }));
+      }, "image/jpeg", 0.92);
+    });
+
+    if (options.live && "BarcodeDetector" in window) {
+      const detector = new BarcodeDetector({ formats: ["qr_code"] });
+      timer = window.setInterval(async () => {
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length && !isClosed) {
+            close();
+            options.live(codes[0].rawValue);
+          }
+        } catch (error) {
+          window.clearInterval(timer);
+          timer = null;
+          hint.textContent = "Could not scan live. Capture the QR image or upload a photo instead.";
+        }
+      }, 350);
+    }
+    capture.focus();
+  }).catch(error => {
+    console.warn("Camera unavailable; opening the device image picker.", error);
+    fallback();
+  });
 }

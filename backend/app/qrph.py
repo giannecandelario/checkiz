@@ -78,15 +78,19 @@ def clean_order_id(order_id: str) -> str:
         raise ValueError("Order ID must contain letters or digits")
     return oid
 
-def build_dynamic(payload: str, amount: float, order_id: str) -> str:
+def build_dynamic(payload: str, amount: float, order_id: str, ref_label=None) -> str:
     """Turn the seller's own QR into a one-order QR: dynamic flag, fixed amount,
-    and the order ID as bill number and reference label (additional data, tag 62)."""
+    and the order ID as bill number; reference label can carry an HMAC signature
+    (pass ref_label from signer.sign) for deterministic authenticity verification.
+    Falls back to plain order_id when ref_label is None."""
     if not (0 < amount <= 9_999_999_999.99):
         raise ValueError("Amount out of range")
     objs = parse_tlv(payload.strip())
     old62 = dict(parse_tlv(dict(objs)["62"])) if "62" in dict(objs) else {}
     oid = clean_order_id(order_id)
-    old62.update({"01": oid, "05": oid})
+    label = ref_label if ref_label is not None else oid
+    old62.update({"01": oid, "05": label})
     new62 = "".join(tlv(t, v) for t, v in sorted(old62.items()))
     keep = [(t, "12" if t == "01" else v) for t, v in objs if t not in ("54", "62", "63")]
     return build(keep + [("54", f"{amount:.2f}"), ("62", new62)])
+

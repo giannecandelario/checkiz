@@ -1,130 +1,237 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkiz</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
-  #drop { border: 2px dashed #888; padding: 40px; text-align: center; border-radius: 8px; cursor: pointer; }
-  #drop.over { background: #f0f0f0; }
-  input[type=text] { padding: 8px; margin: 12px 0; width: 100%; box-sizing: border-box; }
-  textarea { width: 100%; box-sizing: border-box; padding: 8px; }
-  button { padding: 8px 14px; margin-top: 8px; cursor: pointer; }
-  #banner { margin-top: 20px; padding: 16px; border-radius: 8px; color: #fff; display: none; }
-  .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
-  .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
-  small { display: block; margin-top: 8px; opacity: .85; }
-  h2 { margin-top: 32px; font-size: 1.1rem; }
-  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-  td, th { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eef4ef">
+  <meta name="description" content="Check GCash and Maya payments, match alerts to orders, and spot reused receipts.">
+  <title>Payment desk · Chekiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="shared.js" defer></script>
+  <script src="dashboard.js" defer></script>
 </head>
-<body>
-<h1>Checkiz</h1>
-<p>Fake-receipt check for GCash/Maya payments. <a href="qr.html">QR Ph tools</a></p>
-<input type="text" id="order" placeholder="Order ID" value="101">
-<div id="drop">Drop receipt screenshot here or click to choose</div>
-<input id="file" type="file" accept="image/*" hidden>
-<button id="cam" type="button">Take a photo of the receipt</button>
-<input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
-<div id="banner"></div>
+<body class="app-page">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="index.html" aria-label="Chekiz payment desk">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 16.4 13.2 22 25 9.5"/></svg></span>
+        <span>chekiz</span>
+      </a>
+      <p class="sidebar-caption">Seller tools</p>
+      <nav class="primary-nav">
+        <a class="nav-link is-active" href="index.html" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Payment desk</a>
+        <a class="nav-link" href="qr.html"><span class="nav-icon nav-qr" aria-hidden="true">▦</span>QR Ph orders</a>
+        <a class="nav-link" href="overlay.html"><span class="nav-icon" aria-hidden="true">◉</span>Live overlay</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <span class="wallet-mark" aria-hidden="true">₱</span>
+        <p>For your GCash<br>and Maya wallet</p>
+      </div>
+    </aside>
 
-<h2>Recent verifications</h2>
-<p id="stats"><small></small></p>
-<table id="history"><thead><tr><th>Order</th><th>Status</th><th>Ref</th><th>Amount</th></tr></thead><tbody></tbody></table>
-<p><small>Streaming? Add <code>overlay.html</code> as an OBS Browser Source.</small></p>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="mobile-brand">
+          <a class="brand" href="index.html" aria-label="Chekiz payment desk">
+            <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 16.4 13.2 22 25 9.5"/></svg></span>
+            <span>chekiz</span>
+          </a>
+        </div>
+        <nav class="mobile-shortcuts" aria-label="Seller tools">
+          <a href="qr.html">QR</a><a href="overlay.html">Overlay</a>
+        </nav>
+        <span class="topbar-title">Seller payment desk</span>
+        <div id="connectionState" class="connection-state is-loading" role="status" aria-live="polite">
+          <span class="connection-dot" aria-hidden="true"></span><span>Connecting…</span>
+        </div>
+      </header>
 
-<h2>Live order board</h2>
-<p><small>Orders made on the QR page settle by themselves when the matching payment alert arrives. No screenshot needed.</small></p>
-<table id="orders"><thead><tr><th>Order</th><th>Amount</th><th>Status</th></tr></thead><tbody></tbody></table>
+      <main class="main-sheet">
+        <div class="page-content">
+          <div class="page-heading">
+            <div>
+              <h1>Payment desk</h1>
+              <p class="page-intro">Check a receipt, match payment alerts, and know what to pack.</p>
+            </div>
+            <button class="button button-secondary refresh-button" id="refreshButton" type="button">
+              <span aria-hidden="true">↻</span> Refresh
+            </button>
+          </div>
 
-<h2>Ledger (paste alerts)</h2>
-<p><small>Alerts normally arrive from your phone (see docs/SMS_FORWARDING.md). If they don't, paste them here: SMS text or lines copied from the wallet's in-app inbox, separated by a blank line.</small></p>
-<textarea id="sms" rows="3" placeholder="You have received PHP 1,250.00 of GCash from JUAN D. Ref. No. 1002 849 130490."></textarea>
-<button id="addSms">Add to ledger</button>
-<table id="ledger"><thead><tr><th>Ref</th><th>Amount</th><th>Sender</th><th>Source</th></tr></thead><tbody></tbody></table>
+          <div id="globalNotice" class="notice" role="status" aria-live="polite" hidden></div>
 
-<script src="camera.js"></script>
-<script>
-const API = "http://localhost:8000";
-const $ = id => document.getElementById(id);
-const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
-const drop = $("drop"), fileInput = $("file");
-drop.onclick = () => fileInput.click();
-drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
-drop.ondragleave = () => drop.classList.remove("over");
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); send(e.dataTransfer.files[0]); };
-fileInput.onchange = () => send(fileInput.files[0]);
-$("cam").onclick = () => cameraCapture(send);
+          <section class="workbench" aria-labelledby="verifyHeading">
+            <div class="verify-panel">
+              <div class="section-title">
+                <div>
+                  <h2 id="verifyHeading">Check a receipt</h2>
+                  <p>One upload. One clear next step.</p>
+                </div>
+              </div>
+              <form id="verifyForm" novalidate>
+                <label class="field-label" for="orderId">Order ID</label>
+                <input class="text-field" id="orderId" name="order_id" type="text" value="CHK-1042" autocomplete="off" required maxlength="80">
+                <label class="upload-zone" id="uploadZone" for="receiptFile" tabindex="0">
+                  <span class="upload-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M4 15.5v3A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-3"/></svg>
+                  </span>
+                  <span class="upload-copy">
+                    <strong id="fileName">Choose a receipt screenshot</strong>
+                    <span id="fileHint">or take a photo · PNG, JPG · up to 8 MB</span>
+                  </span>
+                  <span class="upload-browse">Browse</span>
+                </label>
+                <input class="visually-hidden" id="receiptFile" type="file" accept="image/png,image/jpeg,image/webp,image/*">
+                <div class="upload-actions">
+                  <button class="button button-primary verify-button" id="verifyButton" type="submit" disabled>
+                    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m5 12 4 4L19 6"/></svg> Verify payment
+                  </button>
+                  <button class="button button-secondary camera-button" id="cameraButton" type="button">Use camera</button>
+                </div>
+                <p class="privacy-note"><span aria-hidden="true">↗</span> Receipt images are processed, then discarded. Only extracted details are kept.</p>
+                <p id="uploadError" class="field-error" role="alert" hidden></p>
+              </form>
+            </div>
 
-function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+            <section class="verdict-panel" aria-labelledby="verdictHeading">
+              <div class="section-title">
+                <div>
+                  <h2 id="verdictHeading">Latest check</h2>
+                  <p id="verdictSubhead">Your next move, at a glance.</p>
+                </div>
+              </div>
+              <div id="verdictResult" class="verdict-result verdict-empty" aria-live="polite" aria-atomic="true">
+                <span class="verdict-symbol" aria-hidden="true">—</span>
+                <div class="verdict-copy">
+                  <strong>No receipt checked yet</strong>
+                  <p>Upload a screenshot to see whether to pack, wait, or stop.</p>
+                </div>
+              </div>
+              <dl class="extracted-fields" id="extractedFields">
+                <div><dt>Amount</dt><dd id="resultAmount">—</dd></div>
+                <div><dt>Reference</dt><dd id="resultReference" class="reference-value">—</dd></div>
+                <div><dt>Image fingerprint</dt><dd id="resultForensics">—</dd></div>
+                <div><dt>Check time</dt><dd id="resultElapsed">—</dd></div>
+              </dl>
+              <div class="forensic-detail" id="forensicDetail" hidden></div>
+            </section>
+          </section>
 
-async function send(file) {
-  if (!file) return;
-  const form = new FormData();
-  form.append("file", file);
-  form.append("order_id", $("order").value);
-  const banner = $("banner");
-  banner.style.display = "block"; banner.className = ""; banner.textContent = "Checking...";
-  try {
-    const res = await fetch(API + "/verify", { method: "POST", body: form });
-    const r = await res.json();
-    banner.className = r.status;
-    banner.innerHTML = `<strong>${esc(r.status.replace("_", " "))}</strong><br>${esc(r.message)}` +
-      (r.warning ? `<small>&#9888; ${esc(r.warning)}</small>` : "") +
-      `<small>ELA ${r.forensics.ela ?? "-"} | Sharpness ${r.forensics.sharpness ?? "-"} | ${r.elapsed_ms ?? "-"} ms</small>`;
-    loadLedger(); loadHistory(); loadOrders();
-  } catch (err) {
-    banner.className = "SUSPECTED_FAKE"; banner.textContent = "Could not reach the server";
-  }
-}
+          <section class="stats-section" aria-labelledby="statsHeading">
+            <div class="section-heading-line">
+              <div>
+                <h2 id="statsHeading">Receipt checks at a glance</h2>
+                <p>Receipt checks recorded by Chekiz</p>
+              </div>
+              <span id="statsUpdated" class="updated-at">Waiting for data</span>
+            </div>
+            <div class="stats-strip" id="statsStrip" aria-live="polite">
+              <div class="stat-item stat-paid"><span class="stat-label">Paid</span><strong id="statPaid">—</strong></div>
+              <div class="stat-item stat-pending"><span class="stat-label">Pending match</span><strong id="statPending">—</strong></div>
+              <div class="stat-item stat-suspicious"><span class="stat-label">Suspected fake</span><strong id="statFake">—</strong></div>
+              <div class="stat-item stat-duplicate"><span class="stat-label">Duplicate</span><strong id="statDuplicate">—</strong></div>
+              <div class="stat-item stat-average"><span class="stat-label">Average check</span><strong id="statAverage">—</strong></div>
+            </div>
+          </section>
 
-async function loadLedger() {
-  try {
-    const rows = await (await fetch(API + "/ledger", { headers: hdr() })).json();
-    $("ledger").querySelector("tbody").innerHTML = rows.map(r =>
-      `<tr><td>${esc(r.ref)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.sender)}</td><td>${esc(r.source)}</td></tr>`).join("");
-  } catch (e) {}
-}
+          <section class="orders-section" aria-labelledby="ordersHeading">
+            <div class="section-heading-line">
+              <div>
+                <h2 id="ordersHeading">Live order board</h2>
+                <p>QR Ph orders update when a matching wallet alert arrives.</p>
+              </div>
+              <a class="text-link" href="qr.html">Make an order QR <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="order-lanes">
+              <section class="lane" aria-labelledby="openHeading">
+                <div class="lane-heading"><h3 id="openHeading">Waiting for payment</h3><span id="openCount" class="count-label">—</span></div>
+                <div id="openOrders" class="row-list" aria-live="polite">
+                  <p class="loading-row">Loading open orders…</p>
+                </div>
+              </section>
+              <section class="lane" aria-labelledby="paidHeading">
+                <div class="lane-heading"><h3 id="paidHeading">Paid orders</h3><span id="paidCount" class="count-label">—</span></div>
+                <div id="paidOrders" class="row-list" aria-live="polite">
+                  <p class="loading-row">Loading paid orders…</p>
+                </div>
+              </section>
+            </div>
+          </section>
 
-async function loadOrders() {
-  try {
-    const rows = await (await fetch(API + "/orders", { headers: hdr() })).json();
-    $("orders").querySelector("tbody").innerHTML = rows.map(r =>
-      `<tr><td>#${esc(r.order_id)}</td><td>${Number(r.amount).toFixed(2)}</td><td>${esc(r.status)}</td></tr>`).join("");
-  } catch (e) {}
-}
+          <section class="pending-section" aria-labelledby="pendingHeading">
+            <div class="section-heading-line">
+              <div>
+                <h2 id="pendingHeading">Waiting on a payment alert</h2>
+                <p>Receipts that looked valid but have no matching wallet alert yet.</p>
+              </div>
+              <span id="pendingCount" class="count-label">—</span>
+            </div>
+            <div id="pendingList" class="data-list" aria-live="polite">
+              <p class="loading-row">Loading pending checks…</p>
+            </div>
+          </section>
 
-async function loadStats() {
-  try {
-    const t = await (await fetch(API + "/stats", { headers: hdr() })).json();
-    const b = t.by_status || {};
-    $("stats").firstChild.textContent = `Total ${t.total} | Verified ${b.VERIFIED || 0} | Pending ${b.PENDING_MATCH || 0} | ` +
-      `Suspected fake ${b.SUSPECTED_FAKE || 0} | Duplicate ${b.DUPLICATE || 0} | Avg ${t.avg_elapsed_ms ?? "-"} ms`;
-  } catch (e) {}
-}
+          <section class="history-section" aria-labelledby="historyHeading">
+            <div class="section-heading-line">
+              <div>
+                <h2 id="historyHeading">Recent receipt checks</h2>
+                <p>Only extracted fields and verdicts are shown here.</p>
+              </div>
+              <span id="historyCount" class="count-label">—</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <caption class="visually-hidden">Recent receipt checks</caption>
+                <thead><tr><th scope="col">Order</th><th scope="col">Result</th><th scope="col">Reference</th><th scope="col" class="numeric">Amount</th><th scope="col" class="numeric">Time</th></tr></thead>
+                <tbody id="historyRows"><tr><td colspan="5" class="loading-row">Loading history…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
 
-async function loadHistory() {
-  loadStats();
-  try {
-    const rows = await (await fetch(API + "/history", { headers: hdr() })).json();
-    $("history").querySelector("tbody").innerHTML = rows.map(r =>
-      `<tr><td>#${esc(r.order_id)}</td><td>${esc(r.status.replace("_", " "))}</td><td>${esc(r.ref)}</td><td>${r.amount == null ? "-" : Number(r.amount).toFixed(2)}</td></tr>`).join("");
-  } catch (e) {}
-}
+          <section class="alert-entry" aria-labelledby="alertHeading">
+            <div class="alert-copy">
+              <h2 id="alertHeading">Add a wallet payment alert</h2>
+              <p>Paste one GCash or Maya “received” message to match it to an open order. Confirm high-value payments in your wallet app before packing.</p>
+            </div>
+            <form id="alertForm" class="alert-form">
+              <label class="field-label" for="alertText">Payment alert text</label>
+              <textarea class="text-field alert-input" id="alertText" rows="3" placeholder="You have received PHP 1,250.00 of GCash from JUAN D. Ref. No. 1002 849 130490." required></textarea>
+              <div class="alert-submit-row">
+                <p id="alertFeedback" class="inline-feedback" role="status" aria-live="polite"></p>
+                <button class="button button-primary" id="addAlertButton" type="submit">Add payment alert</button>
+              </div>
+            </form>
+          </section>
 
-$("addSms").onclick = async () => {
-  const res = await fetch(API + "/ledger/paste", { method: "POST",
-    headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify({ text: $("sms").value }) });
-  if (!res.ok) { alert("No incoming payment found in that text"); return; }
-  const out = await res.json();
-  $("sms").value = ""; loadLedger(); loadHistory(); loadOrders();
-  const hits = out.entries.map(e => e.resolved || e.settled).filter(Boolean);
-  if (hits.length) alert(hits.map(h => `Order #${h.order_id}: ${h.status.replace("_", " ")}`).join("\n"));
-};
-loadLedger(); loadHistory(); loadOrders();
-setInterval(() => { loadOrders(); loadHistory(); loadLedger(); }, 5000);
-</script>
+          <details class="settings-section" id="connectionSettings">
+            <summary>Connection settings</summary>
+            <div class="settings-content">
+              <div>
+                <h2>Connect to your Checkiz server</h2>
+                <p>The API address is set in <code>config.js</code>. Enter a key only if your server requires one.</p>
+              </div>
+              <form id="keyForm" class="key-form">
+                <label class="field-label" for="apiKey">API key</label>
+                <div class="key-input-row">
+                  <input class="text-field" id="apiKey" type="password" autocomplete="current-password" placeholder="No key saved">
+                  <button class="button button-secondary" type="submit">Save key</button>
+                  <button class="button button-quiet" id="clearKey" type="button">Clear</button>
+                </div>
+                <p id="keyFeedback" class="inline-feedback" role="status" aria-live="polite"></p>
+              </form>
+            </div>
+          </details>
+
+          <footer class="page-footer"><span>Chekiz · Payment confidence for every live sale.</span><a href="README.md">Setup guide</a></footer>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="camera.js" defer></script>
 </body>
 </html>
