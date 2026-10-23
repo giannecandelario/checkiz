@@ -1,39 +1,32 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Checkiz Overlay</title>
-<!-- OBS: add as a Browser Source (e.g. 700x160). Optional: ?api=http://localhost:8000&key=SECRET -->
-<style>
-  body { margin: 0; background: transparent; font-family: system-ui, sans-serif; }
-  #card { display: none; margin: 12px; padding: 14px 18px; border-radius: 12px; color: #fff;
-          font-size: 22px; box-shadow: 0 4px 16px rgba(0,0,0,.35); }
-  #card small { display: block; font-size: 15px; opacity: .9; margin-top: 4px; }
-  .VERIFIED { background: #2e7d32; } .PENDING_MATCH { background: #f9a825; color: #000 !important; }
-  .SUSPECTED_FAKE { background: #c62828; } .DUPLICATE { background: #ef6c00; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101915">
+  <title>Live payment overlay · Chekiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="shared.js" defer></script>
+  <script src="overlay.js" defer></script>
 </head>
-<body>
-<div id="card"></div>
-<script>
-const q = new URLSearchParams(location.search);
-const API = q.get("api") || "http://localhost:8000", KEY = q.get("key");
-let lastId = null;
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-async function poll() {
-  try {
-    const res = await fetch(API + "/history?limit=1", { headers: KEY ? { "X-API-Key": KEY } : {} });
-    const [r] = await res.json();
-    if (r && r.id !== lastId) {
-      lastId = r.id;
-      const card = document.getElementById("card");
-      card.className = r.status; card.style.display = "block";
-      card.innerHTML = `Order #${esc(r.order_id)}: <strong>${esc(r.status.replace("_", " "))}</strong>` +
-        `<small>${esc(r.message)}</small>`;
-    }
-  } catch (e) {}
-}
-poll(); setInterval(poll, 2000);
-</script>
+<body class="overlay-page">
+  <main class="overlay-stage">
+    <section class="overlay-card" id="overlayCard" data-status="WAITING" aria-live="polite" aria-atomic="true">
+      <div class="overlay-brand"><span class="overlay-brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 16.4 13.2 22 25 9.5"/></svg></span><span>CHEKIZ</span></div>
+      <span class="overlay-symbol" id="overlaySymbol" aria-hidden="true">…</span>
+      <div class="overlay-main">
+        <p class="overlay-status-label" id="overlayStatusLabel">Waiting for payment checks</p>
+        <h1 id="overlayTitle">Ready when you are</h1>
+        <p class="overlay-message" id="overlayMessage">Latest receipt result will appear here.</p>
+      </div>
+      <div class="overlay-order" id="overlayOrder" hidden></div>
+      <p class="overlay-warning" id="overlayWarning" hidden></p>
+    </section>
+    <p class="overlay-connection" id="overlayConnection" role="status" aria-live="polite">Connecting to payment desk…</p>
+  </main>
 </body>
 </html>
