@@ -1,80 +1,111 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Checkiz QR Ph</title>
-<style>
-  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
-  input[type=text], input[type=number] { padding: 8px; margin: 6px 0; width: 100%; box-sizing: border-box; }
-  button, label.btn { padding: 8px 14px; margin: 6px 6px 6px 0; cursor: pointer; border: 1px solid #888;
-    border-radius: 6px; background: #fff; display: inline-block; font-size: 14px; }
-  .box { border: 1px solid #ddd; border-radius: 8px; padding: 14px; margin-top: 18px; }
-  small { display: block; opacity: .85; margin-top: 6px; } img { max-width: 100%; }
-  h2 { font-size: 1.05rem; margin: 0 0 6px; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#eef4ef">
+  <title>QR Ph orders · Chekiz</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="shared.js" defer></script>
+  <script src="qr.js" defer></script>
 </head>
-<body>
-<h1>Checkiz QR Ph</h1>
-<p><a href="index.html">&larr; Receipt checker</a></p>
-<input type="text" id="key" placeholder="API key (only if the server sets CHECKIZ_API_KEY)">
+<body class="app-page">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="index.html" aria-label="Chekiz payment desk">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 16.4 13.2 22 25 9.5"/></svg></span><span>chekiz</span>
+      </a>
+      <p class="sidebar-caption">Seller tools</p>
+      <nav class="primary-nav">
+        <a class="nav-link" href="index.html"><span class="nav-icon" aria-hidden="true">▦</span>Payment desk</a>
+        <a class="nav-link is-active" href="qr.html" aria-current="page"><span class="nav-icon nav-qr" aria-hidden="true">▦</span>QR Ph orders</a>
+        <a class="nav-link" href="overlay.html"><span class="nav-icon" aria-hidden="true">◉</span>Live overlay</a>
+      </nav>
+      <div class="sidebar-bottom"><span class="wallet-mark" aria-hidden="true">₱</span><p>One QR per order.<br>Less guesswork at checkout.</p></div>
+    </aside>
 
-<div class="box">
-  <h2>1. Your QR Ph</h2>
-  <div id="seller">Checking...</div>
-  <button id="regCam">Scan my QR with camera</button>
-  <label class="btn">Upload image <input type="file" accept="image/*" id="regFile" hidden></label>
-  <small>Use your own "receive money" QR from GCash or Maya. Only the payload is stored on your server.</small>
-</div>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="mobile-brand"><a class="brand" href="index.html" aria-label="Chekiz payment desk"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M7 16.4 13.2 22 25 9.5"/></svg></span><span>chekiz</span></a></div>
+        <nav class="mobile-shortcuts" aria-label="Seller tools">
+          <a href="index.html">Desk</a><a href="overlay.html">Overlay</a>
+        </nav>
+        <a class="back-link" href="index.html">← <span>Payment desk</span></a>
+        <div id="connectionState" class="connection-state is-loading" role="status" aria-live="polite"><span class="connection-dot" aria-hidden="true"></span><span>Connecting…</span></div>
+      </header>
 
-<div class="box">
-  <h2>2. Make a QR for one order</h2>
-  <input type="text" id="oid" placeholder="Order ID" value="104">
-  <input type="number" id="amt" placeholder="Amount (PHP)" value="1250" step="0.01" min="0.01">
-  <label><input type="checkbox" id="cents" checked> Also encode the order in the centavos (fallback if the wallet ignores the reference)</label><br>
-  <button id="gen">Generate QR</button>
-  <div id="genOut"></div>
-</div>
+      <main class="main-sheet">
+        <div class="page-content qr-content">
+          <div class="page-heading">
+            <div><h1>QR Ph orders</h1><p class="page-intro">Register your receive-money QR once. Make a fixed-amount QR for each buyer.</p></div>
+            <a class="button button-secondary qr-back-link" href="index.html">Back to payment desk</a>
+          </div>
+          <div id="qrNotice" class="notice" role="status" aria-live="polite" hidden></div>
 
-<script src="camera.js"></script>
-<script>
-const API = "http://localhost:8000";
-const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const hdr = () => ($("key").value ? { "X-API-Key": $("key").value } : {});
-const json = body => ({ method: "POST", headers: { "Content-Type": "application/json", ...hdr() }, body: JSON.stringify(body) });
+          <section class="seller-setup" aria-labelledby="sellerQrHeading">
+            <div class="seller-setup-copy">
+              <h2 id="sellerQrHeading">Your receive-money QR</h2>
+              <p>Scan with your camera or choose an image of your personal GCash or Maya QR Ph. Chekiz stores its payment payload on your server, not the image.</p>
+              <div id="sellerStatus" class="seller-status" role="status" aria-live="polite"><span class="loading-row">Checking for a registered wallet QR…</span></div>
+              <div class="setup-actions">
+                <button class="button button-primary" id="scanSellerQr" type="button">Scan with camera</button>
+                <label class="button button-secondary file-button" for="sellerQrFile">Upload QR image</label>
+                <input class="visually-hidden" id="sellerQrFile" type="file" accept="image/png,image/jpeg,image/webp,image/*">
+              </div>
+              <p id="sellerFeedback" class="inline-feedback" role="status" aria-live="polite"></p>
+            </div>
+          </section>
 
-async function scan(file) {
-  const f = new FormData(); f.append("file", file);
-  return (await fetch(API + "/qr/decode", { method: "POST", body: f, headers: hdr() })).json();
-}
-async function loadSeller() {
-  try {
-    const r = await (await fetch(API + "/qr/seller", { headers: hdr() })).json();
-    $("seller").textContent = r.registered ? `Registered: ${r.info.merchant_name || "(no name)"}, ${r.info.merchant_city || ""}` : "No QR registered yet.";
-  } catch (e) { $("seller").textContent = "Could not reach the server"; }
-}
-async function register(file) {
-  const r = await scan(file);
-  if (!r.payload) return alert(r.message);
-  const res = await fetch(API + "/qr/register", json({ payload: r.payload }));
-  if (!res.ok) return alert((await res.json()).detail);
-  loadSeller();
-}
-$("regCam").onclick = () => cameraCapture(register, { live: async raw => {
-  const res = await fetch(API + "/qr/register", json({ payload: raw }));
-  res.ok ? loadSeller() : alert((await res.json()).detail); } });
-$("regFile").onchange = e => e.target.files[0] && register(e.target.files[0]);
+          <section class="generate-section" aria-labelledby="generateHeading">
+            <div class="generate-copy">
+              <h2 id="generateHeading">Create a buyer’s QR</h2>
+              <p>Give each order its own amount and reference. Payment alerts can settle the order automatically.</p>
+            </div>
+            <div class="generate-workspace">
+              <form id="generateForm" class="generate-form" novalidate>
+                <label class="field-label" for="qrOrderId">Order ID</label>
+                <input class="text-field" id="qrOrderId" name="order_id" type="text" value="CHK-1043" required maxlength="80" autocomplete="off">
+                <label class="field-label" for="qrAmount">Amount to collect</label>
+                <div class="amount-input-wrap"><span aria-hidden="true">₱</span><input class="text-field" id="qrAmount" name="amount" type="number" min="0.01" max="1000000" step="0.01" value="1250.00" required inputmode="decimal"></div>
+                <label class="centavo-option" for="centavoCode">
+                  <input id="centavoCode" name="centavo_code" type="checkbox" checked>
+                  <span class="checkmark" aria-hidden="true"></span>
+                  <span><strong>Add a unique centavo code</strong><small>Helps distinguish same-price orders if a wallet omits the reference.</small></span>
+                </label>
+                <p class="field-error" id="generateError" role="alert" hidden></p>
+                <button class="button button-primary generate-button" id="generateButton" type="submit" disabled>Generate order QR</button>
+              </form>
+              <div class="qr-output" id="qrOutput" aria-live="polite" aria-atomic="true">
+                <div class="qr-output-empty"><span class="output-mark" aria-hidden="true">⌁</span><p>Your order QR will appear here.</p><small>Register your wallet QR first.</small></div>
+              </div>
+            </div>
+          </section>
 
-$("gen").onclick = async () => {
-  const res = await fetch(API + "/qr/generate", json({ order_id: $("oid").value, amount: Number($("amt").value), centavo_code: $("cents").checked }));
-  const r = await res.json();
-  if (!res.ok) { $("genOut").textContent = r.detail; return; }
-  $("genOut").innerHTML = `<img src="${r.png}" alt="QR"><small>Order #${esc(r.order_id)}: ask the buyer to pay exactly PHP ${r.amount.toFixed(2)}.</small>` +
-    `<a href="${r.png}" download="order-${esc(r.order_id)}.png">Download PNG</a>`;
-};
+          <section class="qr-orders-section" aria-labelledby="qrOrdersHeading">
+            <div class="section-heading-line"><div><h2 id="qrOrdersHeading">Recent QR orders</h2><p>See which buyers still need to pay.</p></div><button class="button button-quiet" id="refreshQrOrders" type="button">Refresh orders</button></div>
+            <div id="qrOrders" class="data-list" aria-live="polite"><p class="loading-row">Loading QR orders…</p></div>
+          </section>
 
-loadSeller();
-</script>
+          <details class="settings-section">
+            <summary>Connection settings</summary>
+            <div class="settings-content">
+              <div><h2>Connect to your Checkiz server</h2><p>The API address is set in <code>config.js</code>. Enter a key only if your server requires one.</p></div>
+              <form id="keyForm" class="key-form">
+                <label class="field-label" for="apiKey">API key</label>
+                <div class="key-input-row"><input class="text-field" id="apiKey" type="password" autocomplete="current-password" placeholder="No key saved"><button class="button button-secondary" type="submit">Save key</button><button class="button button-quiet" id="clearKey" type="button">Clear</button></div>
+                <p id="keyFeedback" class="inline-feedback" role="status" aria-live="polite"></p>
+              </form>
+            </div>
+          </details>
+          <footer class="page-footer"><span>Chekiz · Payment confidence for every live sale.</span><a href="README.md">Setup guide</a></footer>
+        </div>
+      </main>
+    </div>
+  </div>
+  <script src="camera.js" defer></script>
 </body>
 </html>
