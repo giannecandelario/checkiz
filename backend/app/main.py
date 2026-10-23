@@ -13,7 +13,8 @@ from .config import APP_PACKAGES
 from .ingest import ingest_alert
 from .ledger import parse_alert, list_entries
 from . import qrph, qrstore
-from .verify import get_stats, list_history, list_pending, verify_receipt
+from .verify import get_stats, list_history, list_pending, verify_receipt, verify_qr
+from .signer import sign as qr_sign
 
 app = FastAPI(title="Checkiz")
 # Prototype only: restrict origins and add an API key before real use.
@@ -167,14 +168,56 @@ def qr_generate(body: QRGenerate):
         raise HTTPException(400, "Register your QR Ph first")
     try:
         amount = qrstore.next_free_amount(body.amount) if body.centavo_code else round(body.amount, 2)
-        payload = qrph.build_dynamic(seller, amount, body.order_id)
+        # Embed HMAC signature as the reference label (tag 62/05) so the QR is
+        # cryptographically bound to this order_id + amount.
+        signed_label = qr_sign(body.order_id, amount)
+        payload = qrph.build_dynamic(seller, amount, body.order_id, ref_label=signed_label)
     except ValueError as e:
         raise HTTPException(400, str(e))
     qrstore.save_order(body.order_id, amount, body.centavo_code)
     buf = io.BytesIO()
     qrcode.make(payload).save(buf, format="PNG")
     png = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-    return {"order_id": body.order_id, "amount": amount, "payload": payload, "png": png}
+    return {"order_id": body.order_id, "amount": amount, "payload": payload, "png": png,
+            "signed": True}
+
+
+class QRVerifyPayload(BaseModel):
+    payload: str   # raw QR string scanned from the customer's screen
+
+
+@app.post("/qr/verify", dependencies=[Depends(require_key)])
+def qr_verify_endpoint(body: QRVerifyPayload):
+    """
+    Deterministic QR authenticity check.
+
+    Decodes the EMV QR, extracts the order_id and amount that were embedded
+    at generation time, then verifies the HMAC-SHA256 signature in the
+    reference-label field.
+
+    Returns VERIFIED / SUSPECTED_FAKE / UNSIGNED.
+    """
+    try:
+        info = qrph.analyze(body.payload)
+    except ValueError:
+        raise HTTPException(400, "Not a valid EMV QR payload")
+
+    if not (info["is_emv"] and info["crc_valid"]):
+        return {"status": "SUSPECTED_FAKE",
+                "message": "QR failed EMV structure or CRC check",
+                "signed": False, "valid": False}
+
+    order_id = info.get("bill_number") or info.get("reference_label") or ""
+    amount   = info.get("amount")
+    label    = info.get("reference_label") or ""
+
+    if not order_id or amount is None:
+        return {"status": "SUSPECTED_FAKE",
+                "message": "QR is missing order ID or amount fields",
+                "signed": False, "valid": False}
+
+    return verify_qr(order_id, amount, label)
+
 
 @app.get("/qr/orders", dependencies=[Depends(require_key)])
 def qr_orders():
@@ -184,3 +227,4 @@ def qr_orders():
 def orders():
     """Live order board: OPEN orders waiting for payment, PAID ones settled."""
     return qrstore.list_orders()
+
