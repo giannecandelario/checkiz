@@ -305,6 +305,9 @@ async function checkServer() {
 }
 $("overlayLink").textContent = location.protocol.startsWith("http")
   ? location.origin + "/overlay.html" : "overlay.html";
+// Must run before the first loads below: it puts a key remembered in this tab into
+// the box, so the requests that follow carry it.
+checkizKey(() => { loadLedger(); loadHistory(); loadOrders(); loadReview(); });
 checkServer();
 loadLedger(); loadHistory(); loadOrders(); loadReview();
 setInterval(() => { loadOrders(); loadHistory(); loadLedger(); loadReview(); }, 5000);

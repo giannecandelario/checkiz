@@ -110,6 +110,10 @@ $("gen").onclick = async () => {
   };
 };
 
+// This page asked once, at open, and if the key was not in the box yet it left
+// "Invalid or missing API key" on screen with nothing retrying. Entering the key -
+// or having this tab remember it - now re-runs that call.
+checkizKey(() => loadSeller());
 loadSeller();
 </script>
 </body>

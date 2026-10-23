@@ -96,6 +96,31 @@ def test_the_pages_folder_found_for_this_checkout_has_the_dashboard():
     assert (pages / "api.js").is_file()
 
 
+def test_the_api_key_box_is_wired_to_remember_and_reload():
+    """A server with CHECKIZ_API_KEY kept saying "Invalid or missing API key" until the
+    seller retyped the secret on every page and after every refresh, because the box
+    was the only place it lived. The behaviour is executed against a stubbed DOM (see
+    docs/STATUS.md, "The key box that remembered nothing"); this pins the wiring, so a
+    page cannot quietly stop using the helper and pass the behavioural tests."""
+    pages = Path(main.FRONTEND)
+    api = (pages / "api.js").read_text()
+    assert "function checkizKey(" in api
+    assert "sessionStorage.setItem" in api and "sessionStorage.getItem" in api
+    assert "localStorage.setItem" not in api and "localStorage.getItem" not in api, \
+        "a key kept past the tab outlives a shared till"
+
+    idx = (pages / "index.html").read_text()
+    first_request = idx.index("\nloadLedger(); loadHistory(); loadOrders(); loadReview();")
+    assert idx.index("checkizKey(") < first_request, "the box must be filled before the first request"
+    assert "checkizKey(() => { loadLedger(); loadHistory(); loadOrders(); loadReview(); });" in idx
+
+    qr = (pages / "qr.html").read_text()
+    assert "checkizKey(() => loadSeller());\nloadSeller();" in qr, \
+        "the call that fails at open is the one entering the key has to retry"
+    assert "checkizKey" not in (pages / "overlay.html").read_text(), \
+        "the overlay has no box to fill - it takes ?key= in the OBS URL"
+
+
 # ---- the database file location --------------------------------------------
 
 def test_the_database_path_can_be_pointed_at_another_file(tmp_path, monkeypatch):

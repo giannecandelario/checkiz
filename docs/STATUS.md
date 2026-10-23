@@ -1,6 +1,6 @@
 # Status: README claims reconciled against the code
 
-Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite: **196 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
+Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite: **197 tests passing** (`cd backend && pytest`, OCR stubbed). Rule: when this file, `README.md` and the code disagree, the code wins and both documents get fixed.
 
 ## Feature by feature
 
@@ -21,9 +21,10 @@ Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite
 | ELA + sharpness check | Yes, but **not separating the sample pair** | `backend/app/forensics.py` | Flag behaviour is tested; detection quality is not, and cannot be with synthetic samples |
 | Dashboard, order board, OBS overlay | Yes | `frontend/index.html`, `overlay.html`, served by the API itself | No UI harness; but `test_serving.py` proves every page and helper is actually served and that all three load `api.js`. Panel rendering is still only looked at by hand |
 | **Camera capture** | **Yes - README said Planned** | `frontend/camera.js` (getUserMedia + `<input capture>` fallback), wired at `index.html` and `qr.html` | 25 assertions executed in Node against a stubbed window: every refusal reason, the 0x0 startup race, live QR, and the no-`BarcodeDetector` path - three guards then mutated to confirm each one is load-bearing. **No real phone yet**, and the in-app browser here cannot grant camera permission at all |
-| Pages served from the API origin | Yes | `main.py` `frontend_dir()` and the `StaticFiles` mount at `main.py:273`, mounted after every route | `test_serving.py` (16): root, three pages, two helpers, an API route beating the catch-all, and `/health` reporting `ui` |
+| Pages served from the API origin | Yes | `main.py` `frontend_dir()` and the `StaticFiles` mount at `main.py:325`, mounted after every route | `test_serving.py` (17): root, three pages, two helpers, an API route beating the catch-all, `/health` reporting `ui`, and that the pages actually call `checkizKey` |
+| The API key is remembered for the tab and reloads the page | Yes | `api.js:checkizKey()` (`sessionStorage`, not `localStorage`), wired in `index.html` before its first request and in `qr.html` before `loadSeller()`; the overlay is untouched because it takes `?key=` | 17 assertions executed in Node against a stubbed DOM (restore, never overwrite what is typed, save, remove when cleared, one debounced reload per burst of keystrokes, survives blocked storage, no-ops with no box) plus the two page wirings; six mutations, each breaking its own assertion. One of them (`test_serving.py::test_the_api_key_box_is_wired_to_remember_and_reload`) is in the repo so a page cannot quietly stop using the helper. Then re-run in a real browser - see "The key box that remembered nothing" |
 | One rule for where the API is, and a real reason when a request fails | Yes | `frontend/api.js` - `CHECKIZ_API` (`?api=` > own origin > `localhost:8000`), `checkizProblem`, `checkizIsUnreachable`, `checkizWho`, `checkizDownload` | 50 assertions executed in Node against the file as it stands, with a stubbed `location`/`fetch`/`document`/`URL`, plus the dashboard's own `checkServer()` run the same way. Mutating away the same-origin rule, the foreign-server branch, the late revoke and the `"ocr" in h` guard each breaks its own assertion. The harness is not in the repo, so re-checking it means a browser or someone checking it in as a real UI test |
-| `CHECKIZ_DB_PATH`, so two instances do not share one file | Yes | `db.py:_db_path()` | 4 of the 16 in `test_serving.py` (override, relative and `~` forms, the default, and that the pointed-at file is the one created) |
+| `CHECKIZ_DB_PATH`, so two instances do not share one file | Yes | `db.py:_db_path()` | 4 of the 17 in `test_serving.py` (override, relative and `~` forms, the default, and that the pointed-at file is the one created) |
 | **The server says when it cannot read receipts at all** | Yes | `parser.ocr_engine()` (one cached probe), `/health`'s `ocr`, a startup warning, `HTTP 503` on `/verify`, and a banner on the dashboard before the first upload | `test_no_ocr.py` (13): the probe's three answers and its caching, `/health` with and without an engine, the 503 carrying no verdict and writing no history row, the 422 for a blank order, the test that a **stubbed** reader still gets verdicts on a machine with no Tesseract, and two that the dashboard only warns when the server actually reports `ocr: null`. Reproduced live on :8000, then fixed, then reproduced as 503 - see "A server that could not read anything" |
 | Retake hint on a poor photo | Yes | `parser.ocr_confidence` averages Tesseract's per-word scores; `verify.retake_hint` turns a score under `config.OCR_CONFIDENCE_MIN` into `hint` on the verdict, shown in the dashboard banner. `confidence` is on every verdict response; the hint is not stored | `test_confidence.py` (22): the average and each half of its row filter, a blank page as `None`, the floor as config, and four engine tests that pin the status while the hint appears. The **floor** has never been measured on a phone photo - see "Photo quality" |
 | Startup warnings when `CHECKIZ_API_KEY` is unset or no Tesseract is installed | Yes | `main.py:49` | The API-key warning is not asserted by a test. The Tesseract one is only reached through `ocr_engine()`, which is tested; the printed line itself was observed in the server log, not asserted |
@@ -57,6 +58,7 @@ Written 2026-10-23, last reconciled against `feat/device-and-calibration`. Suite
 - **A 0-byte upload crashed `/verify` with a 500.** `cv2.imdecode` returns None for junk bytes but *raises* `(-215:Assertion failed) !buf.empty()` on an empty buffer, so the one input shape the guard did not cover was the one a truncated camera capture or a dropped file produces. Found by writing the fallback's "not a picture" test first: it failed with a 500 traceback. `parser.load_image` now returns None for empty bytes, `/verify` answers its existing "Unreadable image" verdict, and the screenshot endpoint answers 415. Two tests for `load_image`, one for each endpoint.
 - **A direction test that passed for the wrong reason.** With the money-out guard deleted entirely, all 19 tests still passed: the `Sent PHP 500.00` row was being refused by the *no-direction-word* guard, so nothing asserted that outgoing money is excluded on purpose. The rule was rewritten to the closest direction word in the row's window, the test text was given a wallet word so only the direction guard can refuse it, and two more tests were added (a payment listed next to an outgoing row, and a tie). Removing the guard then failed 5 tests.
 - **`docs/DEVICE_TEST.md` was recorded here as not existing** while README referenced it twice. It exists now, and its tables are empty; the row above says which is claimed and which is not.
+- **A defect was reported to the owner from reading the code, and half of it was wrong.** The claim was that the dashboard's key box "is dead until you click something". The box was indeed not remembered anywhere, but the dashboard refetches every panel every 5 seconds (`index.html`'s `setInterval`), so a typed key *did* fill the tables on its own. Reading `hdr()` and the absence of a change handler, and not reading past line 310, produced a confident wrong half. What the browser run actually showed: the QR page said "Invalid or missing API key" at open and retried nothing, and any reload or page switch lost the key. Both are in "The key box that remembered nothing", along with the assertion that would have caught the wrong half earlier.
 
 ## The fallback, run for real
 
@@ -78,6 +80,25 @@ skipped [('money out', 500.0)]
 - The same file posted with no `X-API-Key` answered **401**.
 
 Before the `added` fix above, this same run answered `added: 2` on a database that already held one of the two references, which is how the overstatement was caught. A second live run against a container that was still writing into the gitignored `backend/checkiz.db` (the mount was read-write) showed `already_in_ledger` reporting both and the stored 1,250.00 row keeping `source: "sms"`; that row was deleted afterwards and the file left with its 4 seeded rows. The third run used `-e CHECKIZ_DB_PATH=/tmp/live.db` with the backend mounted `:ro`, which is the way to do this without touching a host database.
+
+## The key box that remembered nothing
+
+The owner asked for a live run in an external browser, so the demo server was started with `CHECKIZ_API_KEY` set - the configuration the docs recommend. Two things fell out of it, both observed in a browser rather than inferred:
+
+- The QR page said **"Invalid or missing API key"** at open and never asked again. `qr.html` calls `loadSeller()` once, at the bottom of the script, and the key box was empty at that moment because nothing carried it over from the dashboard. The seller's own QR section sat on that sentence until some other action happened to retry it.
+- The key lived only in the box. Reload the dashboard, or walk to the QR page, and it was gone - so on a keyed server the secret gets retyped per page and per refresh.
+
+What was **not** true: the dashboard's box being dead. It refetches every panel every 5 seconds, so a typed key filled the tables on its own; the interval was invisible to me until I looked at what the browser actually did. See the corrections bullet above.
+
+The fix is `checkizKey(onChange)` in `api.js`, called before each page's first request: it puts a key remembered in this tab into the box, saves what is typed, and tells the page to reload its data. Three decisions worth stating:
+
+- **`sessionStorage`, not `localStorage`.** Closing the tab forgets the secret. A shop till is often shared, and a key that survives the browser session is a key someone else can read from the box tomorrow. The repo test asserts `localStorage.getItem`/`setItem` never appear.
+- **Debounced at 400 ms.** The obvious wiring reloads on every `input` event, which is four requests per keystroke - twenty keystrokes is eighty requests before the seller finishes pasting.
+- **The overlay is left alone.** It has no box; it takes `?key=` in the OBS URL, which is the only way an OBS browser source can be configured.
+
+Executed, in a real browser against a fresh origin (`http://localhost:8081`, same image): before, `key: ""`, `stored: null`, `ledger: 0` rows. After typing the key, `sessionStorage` held it and the panels reloaded off the 5-second grid (a burst 31 ms after the interval's own batch, which is the handler, not the timer). Reloading the same tab: `key: "demotest"` already in the box and the ledger's 2 rows already drawn, no 401 banner. Then `qr.html` in the same tab: **"No QR registered yet."** - a real answer from the keyed API - where it used to say the key was missing.
+
+The harness ran 17 assertions and six mutations. The first pass at it had a decorative assertion: deleting `if (!box) return;` broke nothing, because the stub's `getElementById` handed back a box even in the "no box on the page" case. Fixed the stub, and that mutation now fails with *"Cannot read properties of null (reading 'addEventListener')"* - the same class of hole as the direction test above, found the same way.
 
 ## Calibration: what the script has actually measured
 
@@ -265,7 +286,7 @@ camera feature is not working". Both were real, and the first was not one bug:
   was still 0x0, handing over a blank photo the server then called unreadable.
 
 Fixes, in the order a seller meets them: the backend serves `frontend/` itself
-(`main.py:273`, mounted after every API route), so there is one origin and no second
+(`main.py:325`, mounted after every API route), so there is one origin and no second
 server; `frontend/api.js` gives all three pages the same rule for finding the API and turns
 every failure into a sentence that names the address, the HTTP status, the content type and
 the likely cause, backed by `/health` now answering `{"ok": true, "name": "checkiz",
@@ -379,10 +400,14 @@ the sample's own wording, which is the calibration gap in "Signals" above, not a
 
 ## What no test covers
 
-The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples and one synthetic transactions screen have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 196 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
+The UI's rendering (the verdict panels have still only been looked at by hand), the two Termux forwarders, real Tesseract behaviour (the samples and one synthetic transactions screen have been put through it by hand in Docker; every test stubs the reader), the consistency thresholds and the confidence floor against genuine receipts, and anything requiring a wallet's actual alert wording. The 197 tests exercise verdict logic with stubbed OCR and hand-written alert text, so they prove the rules, not the parsing of a real provider.
 
 Three things this round added and still does not cover:
 
 - **`calibrate.py` is not tested at all.** Its guards are the ones that matter - no Tesseract, no samples, no boxes, n<3 - and each was only ever checked by running it and reading what it printed. A future edit can make it invent a threshold and no test would notice.
 - **`docs/DEVICE_TEST.md` has no results in it.** Every table is empty because nobody has run the protocol, and nothing in the file is an observation. The parser tests use alert text written to match an assumption about what a wallet says.
 - **The screenshot fallback has been run on one synthetic screen, once.** Not on a wallet's Transactions list, not on a phone photo of a screen, not on a crooked or scrolled list, and not on a screen whose rows have a balance column beside the amount - which is the shape `test_a_balance_column_does_not_beat_the_amount` only guesses at.
+
+## One thing the live run found that is not fixed
+
+The pages and `api.js` are served with `ETag` and `Last-Modified` but **no `Cache-Control`**. Chrome then keeps running the copy it already has: during this very round the tab on `:8080` reported `typeof checkizKey === "undefined"` after the server had been rebuilt with it, and only a different origin (`:8081`) showed the new code. A seller who updates the server can therefore still be running the old page - which is confusing in exactly the way this repo keeps documenting. The fix is one response header on the static mount (`no-cache`, so the browser revalidates and gets a 304 when nothing changed); it is not applied because the owner has not asked for it, and no test would notice either way.

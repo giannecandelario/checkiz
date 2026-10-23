@@ -6,7 +6,7 @@ Checkiz is a triage tool for Filipino online sellers who accept GCash/Maya-style
 
 Built for CSSPRINT 2026 (UST CICS Computer Science Society), problem statement: *a practical digital solution to a specific problem faced by Filipino MSMEs.*
 
-> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 196 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, and no table in it has been filled. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
+> **Status: prototype.** Verdict logic, alert parsing and settlement are covered by 197 automated tests. The phone alert feed and wallet behaviour have **not** been tested on a real device yet - [`docs/DEVICE_TEST.md`](docs/DEVICE_TEST.md) is the protocol for that, and no table in it has been filled. Every feature row below is reconciled against the code in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## Who it is for
 
@@ -135,6 +135,7 @@ The tool is not tied to one wallet: reconciliation keys on reference and amount,
 | Compression and sharpness check (ELA) | Built, **not separating samples**, needs calibration. `backend/calibrate.py` prints a measured table and refuses to suggest a threshold on too few samples ([`docs/CALIBRATION.md`](docs/CALIBRATION.md)) |
 | Dashboard, order board, OBS overlay | Built (basic). Served by the API itself; the panels have no automated tests |
 | One origin for the pages and the API, with a stated reason when a request fails | Built. Serving tested in `tests/test_serving.py`; the page-side helper was executed against a stubbed browser, not clicked through |
+| API key box remembered for the browser tab, and page reloads when it is filled (`checkizKey()` in `frontend/api.js`) | Built, tested ([`backend/tests/test_serving.py`](backend/tests/test_serving.py) checks the wiring in the shipped source; the behaviour was executed against a stubbed DOM and clicked through once in Chrome on a synthetic key). Uses `sessionStorage`, so closing the tab forgets it |
 | Camera capture on the dashboard and QR page | Built (`frontend/camera.js`), its failure paths executed against a stubbed camera - still needs a real phone |
 | Retake hint when a photo reads poorly (`confidence` and `hint` on the verdict) | Built, tested as advice only - the floor has never been measured on a phone photo ([`backend/app/parser.py`](backend/app/parser.py)) |
 | Server states whether it can read receipts at all (`/health` `ocr`, dashboard banner, 503 instead of a crash) | Built, tested ([`backend/tests/test_no_ocr.py`](backend/tests/test_no_ocr.py)) |
@@ -168,7 +169,7 @@ Phone photos of screens are where plain OCR is weakest. An optional vision model
 
 - Reading payment notifications or SMS involves personal and financial data. Philippine privacy rules call for consent that is freely given, specific and informed, with the purpose explained. Show a plain consent screen, collect only what matching needs, process locally where possible, and let sellers delete their data. This is not legal advice.
 - Google Play restricts the SMS permission group to default handlers and a few exceptions, and I did not verify its rules for notification access. The prototype is sideloaded, not distributed through Play. See https://support.google.com/googleplay/android-developer/answer/9047303
-- Set `CHECKIZ_API_KEY`. Without it, anyone who can reach the server can post fake alerts. The server warns at startup (`backend/app/main.py:28`).
+- Set `CHECKIZ_API_KEY`. Without it, anyone who can reach the server can post fake alerts. The server warns at startup (`backend/app/main.py:53`). The dashboard and QR page ask for it once and keep it in `sessionStorage`, which the browser drops when the tab closes - it is deliberately not saved to disk, because a till machine is often shared.
 - Values that originate in alert text (sender names, reference strings) are neutralised before they reach the packing CSV, so a spreadsheet cannot execute a formula hidden in an SMS.
 
 ## Limitations

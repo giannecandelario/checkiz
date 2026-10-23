@@ -85,3 +85,36 @@ async function checkizDownload(src, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
+
+// The API key box, for the pages that have one. Two things it has to do:
+//
+// * Remember the key for this tab. It used to live only in the box, so a reload of
+//   the dashboard, or a walk to the QR page, started from nothing and the server
+//   answered 401 again - the QR page said "Invalid or missing API key" at open and
+//   retried nothing. sessionStorage, not localStorage: closing the tab forgets the
+//   secret, which is the behaviour worth having on a shared shop machine.
+// * Tell the page when it changed. Typing it should load the tables now, not on the
+//   next thing the seller happens to click. Debounced, because firing four requests
+//   per keystroke is its own kind of noise.
+//
+// The overlay is not passed a box at all - it takes ?key= in the OBS URL - so this
+// does nothing there.
+function checkizKey(onChange, debounceMs = 400) {
+  const box = document.getElementById("key");
+  if (!box) return;
+  const KEY = "checkiz:key";
+  let timer = null;
+  try {
+    const saved = sessionStorage.getItem(KEY);
+    if (saved && !box.value) box.value = saved;
+  } catch (e) { /* private mode: the box still works, it is just not remembered */ }
+  box.addEventListener("input", () => {
+    try {
+      if (box.value) sessionStorage.setItem(KEY, box.value);
+      else sessionStorage.removeItem(KEY);
+    } catch (e) { /* same - remembering is the extra, not the point */ }
+    if (!onChange) return;
+    clearTimeout(timer);
+    timer = setTimeout(onChange, debounceMs);
+  });
+}

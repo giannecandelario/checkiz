@@ -61,7 +61,7 @@ What it does and does not do:
 
 ## Safety
 
-- Set `CHECKIZ_API_KEY`. Without it, anyone who can reach the server can post fake alerts. The server prints a warning at startup if it is unset.
+- Set `CHECKIZ_API_KEY`. Without it, anyone who can reach the server can post fake alerts. The server prints a warning at startup if it is unset. The forwarder commands above send it as an `X-API-Key` header; the dashboard and QR page send the same header from the key box at the top, which the browser remembers until that tab is closed.
 - `CHECKIZ_CONFIRM_ABOVE` (default 2000) is the amount above which a non-app alert asks the seller to confirm in the wallet app.
 - Outgoing alerts ("you have sent...") are ignored.
 - SMS and notification access need the phone owner's explicit permission. Forward only payment alerts, and store only what matching needs.
